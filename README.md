@@ -12,7 +12,7 @@ Phases 1–4 of the build are fully exercisable offline, which is what makes the
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest            # 154 tests, ~0.6s
+.venv/bin/python -m pytest            # 172 tests, ~0.6s
 ```
 
 Drive real conversations against a local database:
@@ -164,6 +164,10 @@ campaign registration, served via GitHub Pages
 They are plain static HTML with no build step. The privacy policy contains the
 "no mobile information will be shared with third parties" clause carriers look
 for — don't reword it.
+
+If you edit these, check the live pages afterwards. A policy URL that returns
+200 but renders a placeholder is worse than no URL at all: it reaches a carrier
+reviewer looking finished.
 
 ## Before going live
 
