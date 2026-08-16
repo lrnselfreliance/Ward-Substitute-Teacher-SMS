@@ -67,7 +67,29 @@ CONSENT_DECLINED = (
     "change your mind."
 )
 
-ASK_NAME_PROMPT = "Thanks! What's your name?"
+def opted_in(org: str) -> str:
+    """Confirmation for someone re-subscribing who is already enrolled."""
+    return (
+        f"{org}: You are now opted in to substitute teaching texts. "
+        "Msg&data rates may apply. Reply HELP for help, STOP to opt out."
+    )
+
+
+def opted_in_new(org: str) -> str:
+    """Confirmation plus the first enrollment question, in one segment.
+
+    Every opt-in path lands here -- texting START, texting YES cold, or
+    replying YES to the consent prompt -- so the confirmation a carrier
+    reviewer sees is the same however they arrive.
+    """
+    return (
+        f"{org}: You are now opted in to substitute teaching texts. "
+        "Msg&data rates may apply. Reply HELP for help, STOP to opt out. "
+        "What's your name?"
+    )
+
+
+ASK_NAME_PROMPT = "What's your name?"
 ASK_ROLE = "Are you a TEACHER or a SUBSTITUTE? (reply BOTH if both)"
 ASK_GENDER = "Are you MALE or FEMALE? Subs are matched to teachers of the same gender."
 ASK_CLASS = "What class do you teach?"

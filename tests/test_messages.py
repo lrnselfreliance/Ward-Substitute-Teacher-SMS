@@ -37,6 +37,8 @@ RENDERED = {
     "consent_prompt": M.consent_prompt(ORG),
     "CONSENT_DECLINED": M.CONSENT_DECLINED,
     "ASK_NAME_PROMPT": M.ASK_NAME_PROMPT,
+    "opted_in": M.opted_in(ORG),
+    "opted_in_new": M.opted_in_new(ORG),
     "ASK_ROLE": M.ASK_ROLE,
     "ASK_GENDER": M.ASK_GENDER,
     "ASK_CLASS": M.ASK_CLASS,
@@ -149,6 +151,15 @@ def test_unsolicited_messages_identify_the_sender(name, text):
     brand has to actually be there.
     """
     assert text.startswith(f"{ORG}:"), f"{name} does not lead with the brand"
+
+
+@pytest.mark.parametrize("text", [M.opted_in(ORG), M.opted_in_new(ORG)])
+def test_opt_in_confirmation_has_everything_the_campaign_promises(text):
+    """Brand, enrollment confirmation, help instructions, opt-out."""
+    assert text.startswith(f"{ORG}:")
+    assert "opted in" in text
+    assert "HELP" in text
+    assert "STOP" in text
 
 
 def test_the_offer_repeats_the_opt_out():

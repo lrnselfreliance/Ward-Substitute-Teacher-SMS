@@ -247,3 +247,62 @@ def test_consent_timestamp_marks_the_yes_not_first_contact(app):
         person = session.scalar(select(Person).where(Person.phone == NEW))
         assert person.consent_at == app.clock.now()
         assert person.created_at < person.consent_at
+
+
+# -- registered A2P opt-in keywords ----------------------------------------
+
+
+def test_start_keyword_opts_a_stranger_in(app):
+    app.sms(NEW, "START")
+    reply = app.last(NEW)
+    assert reply.startswith("Clover Leaf Ward:")
+    assert "opted in" in reply and "HELP" in reply and "STOP" in reply
+    with app.session_factory() as session:
+        person = session.scalar(select(Person).where(Person.phone == NEW))
+        assert person.active is True
+        assert person.consent_at is not None
+        assert person.enroll_state == "ask_name"
+
+
+def test_yes_cold_is_an_opt_in(app):
+    """YES is a registered opt-in keyword, so it works with no context."""
+    app.sms(NEW, "yes")
+    assert "opted in" in app.last(NEW)
+
+
+def test_unstop_reactivates_after_stop(app):
+    app.enroll(SUBS[0], "Sam")
+    app.sms(SUBS[0], "STOP")
+    app.sms(SUBS[0], "UNSTOP")
+    assert "opted in" in app.last(SUBS[0])
+    with app.session_factory() as session:
+        assert session.scalar(
+            select(Person).where(Person.phone == SUBS[0])
+        ).active is True
+
+
+def test_opt_in_keyword_never_hijacks_an_active_members_yes(staffed):
+    """The one way this could break: swallowing an answer to an offer."""
+    app = staffed
+    app.sms(TEACHER, "SUB 3/15")
+    asked = sorted(app.texted(*SUBS[:6]))[0]
+    app.clear()
+
+    app.sms(asked, "yes")
+
+    assert "You're subbing" in app.last(asked)
+    assert "opted in" not in app.last(asked)
+
+
+def test_every_opt_in_path_gives_the_same_confirmation(app):
+    """Reviewer may arrive via START, cold YES, or the consent prompt."""
+    a, b, c = "+15551110001", "+15551110002", "+15551110003"
+    app.sms(a, "START")
+    app.sms(b, "yes")
+    app.sms(c, "hi")
+    app.sms(c, "yes")
+
+    for phone in (a, b, c):
+        reply = app.last(phone)
+        assert "opted in" in reply
+        assert "What's your name?" in reply

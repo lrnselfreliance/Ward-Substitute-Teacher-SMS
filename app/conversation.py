@@ -52,7 +52,10 @@ from .parsers import (
 log = logging.getLogger(__name__)
 
 STOP_WORDS = {"stop", "unsubscribe", "cancel me", "quit", "end", "stopall"}
-START_WORDS = {"start", "unstop", "resubscribe"}
+# Registered A2P opt-in keywords. These only take effect for someone who is
+# unknown or inactive -- an enrolled member's "yes" must still answer the
+# offer they are holding.
+START_WORDS = {"start", "unstop", "resubscribe", "yes", "unstopall"}
 
 
 class Router:
@@ -98,12 +101,8 @@ class Router:
                 person.active = False
                 self._release_pending(session, person)
             return M.STOPPED
-        if text in START_WORDS:
-            if person:
-                person.active = True
-                return M.RESUMED
-            person = self._create(session, phone, body)
-            return self._consent_prompt()
+        if text in START_WORDS and (person is None or not person.active):
+            return self._opt_in(session, person, phone, body)
         if text == "help":
             if person and person.enrolled:
                 return M.help_for(person)
@@ -165,6 +164,31 @@ class Router:
         return M.UNKNOWN
 
     # -- helpers ------------------------------------------------------------
+
+    def _opt_in(
+        self, session: Session, person: Person | None, phone: str, body: str
+    ) -> str:
+        """Handle a registered opt-in keyword: START, YES, UNSTOP, ...
+
+        Always replies with a branded confirmation carrying HELP and STOP,
+        which is what the A2P campaign registration promises.
+        """
+        now = self.clock.now()
+        if person is None:
+            person = self._create(session, phone, body)
+        person.active = True
+
+        if person.enrolled:
+            return M.opted_in(self.config.org_name)
+
+        if person.enroll_state == ASK_CONSENT:
+            person.consent_at = now
+            person.enroll_state = ASK_NAME
+            return M.opted_in_new(self.config.org_name)
+
+        # Part-way through enrollment: confirm, then repeat where they left off.
+        self.gateway.send(phone, M.opted_in(self.config.org_name))
+        return self._prompt_for(person)
 
     def _create(self, session: Session, phone: str, body: str) -> Person:
         now = self.clock.now()
@@ -252,7 +276,7 @@ class Router:
             person.active = True
             person.consent_at = self.clock.now()
             person.enroll_state = ASK_NAME
-            return M.ASK_NAME_PROMPT
+            return M.opted_in_new(self.config.org_name)
 
         if state == ASK_NAME:
             name = clean_name(body)
