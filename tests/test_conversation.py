@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select
 
 from app.models import DONE, Person
@@ -312,3 +313,63 @@ def test_join_keyword_works(app):
     """The public opt-in page tells people to text JOIN, so JOIN must work."""
     app.sms(NEW, "JOIN")
     assert "opted in" in app.last(NEW)
+
+
+# -- registered A2P opt-out and help keywords ------------------------------
+# These must match exactly what the campaign registration declares; carriers
+# test them, and a keyword that does something else is a compliance failure.
+
+
+@pytest.mark.parametrize(
+    "keyword",
+    ["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "QUIT", "END", "OPTOUT", "REVOKE"],
+)
+def test_every_registered_opt_out_keyword_opts_out(app, keyword):
+    app.enroll(SUBS[0], "Sam")
+    app.sms(SUBS[0], keyword)
+    assert "unsubscribed" in app.last(SUBS[0])
+    with app.session_factory() as session:
+        assert session.scalar(
+            select(Person).where(Person.phone == SUBS[0])
+        ).active is False
+
+
+def test_cancel_with_a_date_still_cancels_the_request(app):
+    """Bare CANCEL opts out, but the teacher command keeps working."""
+    app.enroll(TEACHER, "Tom", teacher=True, substitute=False, class_name="3rd grade")
+    app.enroll(SUBS[0], "Sam")
+    app.sms(TEACHER, "SUB 3/15")
+    app.sms(TEACHER, "CANCEL 3/15")
+
+    assert "Cancelled" in app.last(TEACHER)
+    with app.session_factory() as session:
+        assert session.scalar(
+            select(Person).where(Person.phone == TEACHER)
+        ).active is True
+
+
+@pytest.mark.parametrize("keyword", ["HELP", "INFO"])
+def test_registered_help_keywords_work(app, keyword):
+    app.enroll(SUBS[0], "Sam")
+    app.sms(SUBS[0], keyword)
+    assert "Substitute Finder" in app.last(SUBS[0])
+
+
+def test_help_reply_carries_brand_and_disclosures(app):
+    """What a carrier checks a HELP response for."""
+    app.enroll(TEACHER, "Tom", teacher=True, substitute=False, class_name="3rd grade")
+    app.enroll(SUBS[0], "Sam", admin=True)
+    for phone in (TEACHER, SUBS[0]):
+        app.sms(phone, "HELP")
+        reply = app.last(phone)
+        assert reply.startswith("Clover Leaf Ward Substitute Finder:")
+        assert "rates may apply" in reply
+        assert "STOP" in reply
+
+
+def test_stop_confirmation_is_branded(app):
+    app.enroll(SUBS[0], "Sam")
+    app.sms(SUBS[0], "STOP")
+    reply = app.last(SUBS[0])
+    assert reply.startswith("Clover Leaf Ward:")
+    assert "START to rejoin" in reply

@@ -51,7 +51,15 @@ from .parsers import (
 
 log = logging.getLogger(__name__)
 
-STOP_WORDS = {"stop", "unsubscribe", "cancel me", "quit", "end", "stopall"}
+# Registered A2P opt-out keywords. CANCEL is a CTIA-standard opt-out word and
+# Twilio intercepts it, so a bare CANCEL must opt out here too; the teacher
+# command still works as "CANCEL <date>", which carries an argument and is
+# never treated as a keyword.
+STOP_WORDS = {
+    "stop", "stopall", "unsubscribe", "cancel", "cancel me",
+    "quit", "end", "optout", "opt out", "revoke",
+}
+HELP_WORDS = {"help", "info"}
 # Registered A2P opt-in keywords. These only take effect for someone who is
 # unknown or inactive -- an enrolled member's "yes" must still answer the
 # offer they are holding.
@@ -100,12 +108,12 @@ class Router:
             if person:
                 person.active = False
                 self._release_pending(session, person)
-            return M.STOPPED
+            return M.stopped(self.config.org_name)
         if text in START_WORDS and (person is None or not person.active):
             return self._opt_in(session, person, phone, body)
-        if text == "help":
+        if text in HELP_WORDS:
             if person and person.enrolled:
-                return M.help_for(person)
+                return M.help_for(person, self.config.org_name)
             if person:
                 return self._prompt_for(person)
             person = self._create(session, phone, body)

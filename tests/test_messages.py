@@ -54,7 +54,7 @@ RENDERED = {
     "superseded": M.superseded(ORG),
     "PAUSED": M.PAUSED,
     "RESUMED": M.RESUMED,
-    "STOPPED": M.STOPPED,
+    "stopped": M.stopped(ORG),
     "UNKNOWN": M.UNKNOWN,
     "QUIET_BROADCAST": M.QUIET_BROADCAST,
     "NEED_CLASS": M.NEED_CLASS,
@@ -117,11 +117,12 @@ def test_every_public_message_is_covered():
         for name, value in vars(M).items()
         if not name.startswith("_")
         and inspect.isfunction(value)
-        and name not in {"pretty_date", "pretty_sundays", "describe", "help_for"}
+        and name not in {"pretty_date", "pretty_sundays", "describe", "help_for",
+                         "help_stranger"}
     }
     missing = (public | functions) - set(RENDERED) - MULTI_SEGMENT_BY_DESIGN
     # NOT_SUNDAY is a template filled in at call time.
-    missing -= {"NOT_SUNDAY", "HELP_STRANGER", "admin_last_call", "admin_digest"}
+    missing -= {"NOT_SUNDAY", "HELP_FOOTER", "admin_last_call", "admin_digest"}
     assert not missing, f"add these to RENDERED: {sorted(missing)}"
 
 

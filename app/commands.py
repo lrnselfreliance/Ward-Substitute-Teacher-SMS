@@ -271,7 +271,7 @@ def cmd_resume(ctx: Ctx) -> str:
 
 
 def cmd_help(ctx: Ctx) -> str:
-    return M.help_for(ctx.person)
+    return M.help_for(ctx.person, ctx.config.org_name)
 
 
 # -- admin -----------------------------------------------------------------

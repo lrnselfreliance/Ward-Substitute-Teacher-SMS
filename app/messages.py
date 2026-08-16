@@ -215,7 +215,12 @@ def sundays_set(mask: int) -> str:
 
 PAUSED = "Paused. You won't be contacted until you text RESUME."
 RESUMED = "Welcome back! You're active again."
-STOPPED = "You've been removed and won't be texted again. Text START to rejoin."
+def stopped(org: str) -> str:
+    return (
+        f"{org}: You have been unsubscribed and will not receive any more "
+        "messages. Reply START to rejoin."
+    )
+
 UNKNOWN = "Sorry, I didn't understand. Text HELP for what I can do."
 
 QUIET_BROADCAST = "Broadcasts only go out 8am-9pm. Try again in the morning."
@@ -223,10 +228,10 @@ QUIET_BROADCAST = "Broadcasts only go out 8am-9pm. Try again in the morning."
 
 # -- help ------------------------------------------------------------------
 
-HELP_COMMON = ["HELP - this list", "STATUS - where things stand", "STOP - opt out"]
+HELP_COMMON = ["HELP - this list", "STATUS - where things stand"]
 HELP_TEACHER = [
     "SUB <date> - request a sub",
-    "CANCEL <date> - cancel a request",
+    "CANCEL <date> - cancel that request",
     "WHO - who's subbing for you",
     "CLASS <name> - change your class",
 ]
@@ -242,9 +247,16 @@ HELP_ADMIN = [
 ]
 
 
-def help_for(person) -> str:
-    """Role-aware: people only see commands they can actually use."""
-    lines: list[str] = []
+HELP_FOOTER = "Msg&data rates may apply. Reply STOP to opt out."
+
+
+def help_for(person, org: str) -> str:
+    """Role-aware: people only see commands they can actually use.
+
+    Every variant is topped with the brand and tailed with the rate and
+    opt-out disclosure, which is what carriers check a HELP reply for.
+    """
+    lines: list[str] = [f"{org} Substitute Finder:"]
     if person.is_teacher:
         lines += HELP_TEACHER
     if person.is_substitute:
@@ -252,10 +264,15 @@ def help_for(person) -> str:
     lines += HELP_COMMON
     if person.is_admin:
         lines += HELP_ADMIN
+    lines.append(HELP_FOOTER)
     return "\n".join(lines)
 
 
-HELP_STRANGER = "Text anything to sign up as a teacher or substitute."
+def help_stranger(org: str) -> str:
+    return (
+        f"{org} Substitute Finder: text JOIN to sign up as a teacher or "
+        f"substitute. {HELP_FOOTER}"
+    )
 
 
 # -- admin pushes ----------------------------------------------------------
