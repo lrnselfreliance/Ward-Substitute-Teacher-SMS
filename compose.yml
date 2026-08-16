@@ -1,0 +1,22 @@
+services:
+  substitute:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Load-bearing, not cosmetic: quiet hours, nth_sunday() and "tomorrow"
+      # all resolve in local church time. A container defaulting to UTC would
+      # compute the wrong nth Sunday for any Saturday-evening request.
+      TZ: ${TZ:-America/Denver}
+      DB_PATH: /data/substitute.db
+      BACKUP_DIR: /data/backups
+    volumes:
+      - ./data:/data
+    # No ports are published. With INBOUND_MODE=poll the app only makes
+    # outbound HTTPS calls, so nothing needs to reach it -- no domain, no
+    # tunnel, no port forwarding.
+    #
+    # Only if you switch to INBOUND_MODE=webhook, uncomment this and point a
+    # tunnel at it:
+    # ports:
+    #   - "127.0.0.1:8080:8080"

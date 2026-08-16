@@ -1,0 +1,26 @@
+# Secrets — never commit. Twilio credentials live here.
+.env
+.env.*
+!.env.example
+
+# Runtime data: the database, WAL sidecars, and backups.
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
