@@ -15,6 +15,7 @@ import pytest
 from app import messages as M
 
 SUNDAY = date(2026, 3, 15)
+ORG = "Clover Leaf Ward"
 
 
 class _Person:
@@ -33,7 +34,7 @@ class _Person:
 MULTI_SEGMENT_BY_DESIGN = {"request_ack_late", "consent_prompt"}
 
 RENDERED = {
-    "consent_prompt": M.consent_prompt("Clover Leaf Ward"),
+    "consent_prompt": M.consent_prompt(ORG),
     "CONSENT_DECLINED": M.CONSENT_DECLINED,
     "ASK_NAME_PROMPT": M.ASK_NAME_PROMPT,
     "ASK_ROLE": M.ASK_ROLE,
@@ -48,7 +49,7 @@ RENDERED = {
     "BAD_SUNDAYS": M.BAD_SUNDAYS,
     "BAD_YESNO": M.BAD_YESNO,
     "TOO_LATE": M.TOO_LATE,
-    "SUPERSEDED": M.SUPERSEDED,
+    "superseded": M.superseded(ORG),
     "PAUSED": M.PAUSED,
     "RESUMED": M.RESUMED,
     "STOPPED": M.STOPPED,
@@ -59,15 +60,19 @@ RENDERED = {
     "confirm": M.confirm(_Person()),
     "request_ack": M.request_ack("3rd grade", SUNDAY),
     "request_ack_after_hours": M.request_ack_after_hours("3rd grade", SUNDAY),
-    "offer": M.offer("Tom Teacher", "3rd grade", SUNDAY, None),
-    "accepted_sub": M.accepted_sub("Tom Teacher", "+15551234567", "3rd grade", SUNDAY),
-    "accepted_teacher": M.accepted_teacher("Sam Sub", "+15551234567", SUNDAY),
-    "unfilled_teacher": M.unfilled_teacher("3rd grade", SUNDAY),
+    "offer": M.offer(ORG, "Tom Teacher", "3rd grade", SUNDAY, None),
+    "accepted_sub": M.accepted_sub(
+        ORG, "Tom Teacher", "+15551234567", "3rd grade", SUNDAY
+    ),
+    "accepted_teacher": M.accepted_teacher(ORG, "Sam Sub", "+15551234567", SUNDAY),
+    "unfilled_teacher": M.unfilled_teacher(ORG, "3rd grade", SUNDAY),
     "cancelled": M.cancelled(SUNDAY),
     "class_set": M.class_set("5th grade"),
     "sundays_set": M.sundays_set(0b10101),
-    "admin_unfilled": M.admin_unfilled("3rd grade", SUNDAY, "Tom Teacher"),
-    "admin_short_notice": M.admin_short_notice("3rd grade", SUNDAY, "Tom Teacher"),
+    "admin_unfilled": M.admin_unfilled(ORG, "3rd grade", SUNDAY, "Tom Teacher"),
+    "admin_short_notice": M.admin_short_notice(
+        ORG, "3rd grade", SUNDAY, "Tom Teacher"
+    ),
 }
 
 
@@ -87,8 +92,8 @@ def test_long_message_is_a_declared_exception():
 
 def test_consent_prompt_carries_the_required_disclosures():
     """A campaign reviewer texting the number sees this first."""
-    text = M.consent_prompt("Clover Leaf Ward")
-    assert "Clover Leaf Ward" in text
+    text = M.consent_prompt(ORG)
+    assert ORG in text
     assert "consent" in text.lower()
     assert "msg frequency varies" in text.lower()
     assert "rates may apply" in text.lower()
@@ -122,3 +127,30 @@ def test_sunday_formatting():
     assert M.pretty_sundays(0b11111) == "all Sundays"
     assert M.pretty_sundays(0b00101) == "1st/3rd Sundays"
     assert M.pretty_date(SUNDAY) == "Sun Mar 15"
+
+
+BRANDED = {
+    "offer": M.offer(ORG, "Tom Teacher", "3rd grade", SUNDAY, None),
+    "accepted_sub": M.accepted_sub(ORG, "Tom", "+15551234567", "3rd grade", SUNDAY),
+    "accepted_teacher": M.accepted_teacher(ORG, "Sam", "+15551234567", SUNDAY),
+    "superseded": M.superseded(ORG),
+    "unfilled_teacher": M.unfilled_teacher(ORG, "3rd grade", SUNDAY),
+    "admin_unfilled": M.admin_unfilled(ORG, "3rd grade", SUNDAY, "Tom"),
+    "admin_digest": M.admin_digest(ORG, ["3rd grade (Tom)"]),
+    "admin_last_call": M.admin_last_call(ORG, ["3rd grade (Tom)"]),
+}
+
+
+@pytest.mark.parametrize("name,text", sorted(BRANDED.items()))
+def test_unsolicited_messages_identify_the_sender(name, text):
+    """Anything a member did not just prompt must name who is texting them.
+
+    Registered A2P sample messages are compared against real traffic, so the
+    brand has to actually be there.
+    """
+    assert text.startswith(f"{ORG}:"), f"{name} does not lead with the brand"
+
+
+def test_the_offer_repeats_the_opt_out():
+    """The most frequently received unsolicited message carries STOP."""
+    assert "STOP" in M.offer(ORG, "Tom", "3rd grade", SUNDAY, None)

@@ -162,9 +162,11 @@ def cmd_cancel(ctx: Ctx) -> str:
     for offer in request.offers:
         if offer.status == PENDING:
             offer.status = SUPERSEDED
-            ctx.gateway.send(offer.person.phone, M.SUPERSEDED)
+            ctx.gateway.send(offer.person.phone, M.superseded(ctx.config.org_name))
     if request.filled_by:
-        ctx.gateway.send(request.filled_by.phone, M.SUPERSEDED)
+        ctx.gateway.send(
+            request.filled_by.phone, M.superseded(ctx.config.org_name)
+        )
     ctx.session.flush()
     return M.cancelled(service_date)
 
@@ -402,7 +404,7 @@ def admin_fill(ctx: Ctx) -> str:
     for offer in request.offers:
         if offer.status == PENDING:
             offer.status = SUPERSEDED
-            ctx.gateway.send(offer.person.phone, M.SUPERSEDED)
+            ctx.gateway.send(offer.person.phone, M.superseded(ctx.config.org_name))
     ctx.session.flush()
     return f"Recorded: {person.name} subbing {M.pretty_date(when)}."
 

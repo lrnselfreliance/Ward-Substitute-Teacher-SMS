@@ -126,36 +126,51 @@ def request_ack_late(class_name: str | None, d: date) -> str:
     )
 
 
-def offer(teacher_name: str, class_name: str | None, d: date, note: str | None) -> str:
+def offer(
+    org: str, teacher_name: str, class_name: str | None, d: date, note: str | None
+) -> str:
+    """The recurring unsolicited message, so it carries brand and STOP.
+
+    Messages a member did not just prompt need to identify the sender; this
+    one also repeats the opt-out because it is the message they receive most.
+    """
     what = class_name or "a class"
     extra = f" ({note})" if note else ""
     return (
-        f"Can you sub for {teacher_name}'s {what} on {pretty_date(d)}?{extra} "
-        "Reply YES or NO."
+        f"{org}: Can you sub for {teacher_name}'s {what} on {pretty_date(d)}?"
+        f"{extra} Reply YES or NO, or STOP to opt out."
     )
 
 
-def accepted_sub(teacher_name: str, phone: str, class_name: str | None, d: date) -> str:
+def accepted_sub(
+    org: str, teacher_name: str, phone: str, class_name: str | None, d: date
+) -> str:
     what = class_name or "the class"
     return (
-        f"Thank you! You're subbing {what} on {pretty_date(d)}. "
+        f"{org}: Thank you! You're subbing {what} on {pretty_date(d)}. "
         f"{teacher_name}: {phone}"
     )
 
 
-def accepted_teacher(sub_name: str, phone: str, d: date) -> str:
-    return f"{sub_name} can sub for you on {pretty_date(d)}. Reach them at {phone}."
+def accepted_teacher(org: str, sub_name: str, phone: str, d: date) -> str:
+    return (
+        f"{org}: {sub_name} can sub for you on {pretty_date(d)}. "
+        f"Reach them at {phone}."
+    )
 
 
 TOO_LATE = "Thanks for replying! That one just got filled by someone else."
-SUPERSEDED = "Never mind - that Sunday is covered now. Thanks!"
 
 
-def unfilled_teacher(class_name: str | None, d: date) -> str:
+def superseded(org: str) -> str:
+    return f"{org}: Never mind - that Sunday is covered now. Thanks!"
+
+
+def unfilled_teacher(org: str, class_name: str | None, d: date) -> str:
     what = class_name or "your class"
     return (
-        f"I couldn't find a sub for {what} on {pretty_date(d)} - everyone available "
-        "has been asked. You'll need to arrange someone directly."
+        f"{org}: I couldn't find a sub for {what} on {pretty_date(d)} - everyone "
+        "available has been asked. You'll need to arrange someone directly."
     )
 
 
@@ -224,21 +239,27 @@ HELP_STRANGER = "Text anything to sign up as a teacher or substitute."
 # -- admin pushes ----------------------------------------------------------
 
 
-def admin_unfilled(class_name: str | None, d: date, teacher: str) -> str:
-    return f"UNFILLED: {class_name or 'class'} on {pretty_date(d)} ({teacher}). Nobody left to ask."
-
-
-def admin_short_notice(class_name: str | None, d: date, teacher: str) -> str:
-    return f"Short notice: {teacher} needs a sub for {class_name or 'class'} on {pretty_date(d)}."
-
-
-def admin_last_call(items: list[str]) -> str:
-    body = "; ".join(items)
+def admin_unfilled(org: str, class_name: str | None, d: date, teacher: str) -> str:
     return (
-        f"Still no sub for: {body}. I stop texting at 9pm and resume at 8am - "
-        "you may want to make some calls tonight."
+        f"{org}: UNFILLED - {class_name or 'class'} on {pretty_date(d)} "
+        f"({teacher}). Nobody left to ask."
     )
 
 
-def admin_digest(items: list[str]) -> str:
-    return "Open for tomorrow: " + "; ".join(items)
+def admin_short_notice(org: str, class_name: str | None, d: date, teacher: str) -> str:
+    return (
+        f"{org}: Short notice - {teacher} needs a sub for "
+        f"{class_name or 'class'} on {pretty_date(d)}."
+    )
+
+
+def admin_last_call(org: str, items: list[str]) -> str:
+    body = "; ".join(items)
+    return (
+        f"{org}: Still no sub for {body}. I stop texting at 9pm and resume at "
+        "8am - you may want to make some calls tonight."
+    )
+
+
+def admin_digest(org: str, items: list[str]) -> str:
+    return f"{org}: Open for tomorrow - " + "; ".join(items)

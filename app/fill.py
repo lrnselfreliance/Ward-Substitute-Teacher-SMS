@@ -108,6 +108,7 @@ class Filler:
             self.gateway.send(
                 person.phone,
                 M.offer(
+                    self.config.org_name,
                     request.teacher.name,
                     request.class_name,
                     request.service_date,
@@ -122,12 +123,17 @@ class Filler:
         session.flush()
         self.gateway.send(
             request.teacher.phone,
-            M.unfilled_teacher(request.class_name, request.service_date),
+            M.unfilled_teacher(
+                self.config.org_name, request.class_name, request.service_date
+            ),
         )
         self.notify_admins(
             session,
             M.admin_unfilled(
-                request.class_name, request.service_date, request.teacher.name
+                self.config.org_name,
+                request.class_name,
+                request.service_date,
+                request.teacher.name,
             ),
         )
 
@@ -172,15 +178,23 @@ class Filler:
         ).all()
         for other in others:
             other.status = SUPERSEDED
-            self.gateway.send(other.person.phone, M.SUPERSEDED)
+            self.gateway.send(
+                other.person.phone, M.superseded(self.config.org_name)
+            )
 
         self.gateway.send(
             teacher.phone,
-            M.accepted_teacher(sub.name, sub.phone, request.service_date),
+            M.accepted_teacher(
+                self.config.org_name, sub.name, sub.phone, request.service_date
+            ),
         )
         session.flush()
         return M.accepted_sub(
-            teacher.name, teacher.phone, request.class_name, request.service_date
+            self.config.org_name,
+            teacher.name,
+            teacher.phone,
+            request.class_name,
+            request.service_date,
         )
 
     def decline(self, session: Session, offer: Offer, raw: str) -> None:
@@ -272,9 +286,13 @@ class Filler:
         if now_local.time() >= self.config.digest_at:
             rows = existing_at(self.config.digest_at)
             if rows and self._once(session, "sat_digest", key):
-                self.notify_admins(session, M.admin_digest(label(rows)))
+                self.notify_admins(
+                    session, M.admin_digest(self.config.org_name, label(rows))
+                )
 
         if now_local.time() >= self.config.last_call_at:
             rows = existing_at(self.config.last_call_at)
             if rows and self._once(session, "sat_last_call", key):
-                self.notify_admins(session, M.admin_last_call(label(rows)))
+                self.notify_admins(
+                    session, M.admin_last_call(self.config.org_name, label(rows))
+                )
