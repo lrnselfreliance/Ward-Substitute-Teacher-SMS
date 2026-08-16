@@ -55,7 +55,7 @@ STOP_WORDS = {"stop", "unsubscribe", "cancel me", "quit", "end", "stopall"}
 # Registered A2P opt-in keywords. These only take effect for someone who is
 # unknown or inactive -- an enrolled member's "yes" must still answer the
 # offer they are holding.
-START_WORDS = {"start", "unstop", "resubscribe", "yes", "unstopall"}
+START_WORDS = {"start", "join", "unstop", "unstopall", "resubscribe", "yes"}
 
 
 class Router:

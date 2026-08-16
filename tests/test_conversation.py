@@ -306,3 +306,9 @@ def test_every_opt_in_path_gives_the_same_confirmation(app):
         reply = app.last(phone)
         assert "opted in" in reply
         assert "What's your name?" in reply
+
+
+def test_join_keyword_works(app):
+    """The public opt-in page tells people to text JOIN, so JOIN must work."""
+    app.sms(NEW, "JOIN")
+    assert "opted in" in app.last(NEW)
