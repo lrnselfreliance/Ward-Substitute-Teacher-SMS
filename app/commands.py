@@ -24,6 +24,7 @@ from .models import (
     Request,
 )
 from .parsers import clean_name, parse_date, parse_sundays, split_command
+from .ranking import eligible
 
 
 def normalize_phone(raw: str) -> str | None:
@@ -135,10 +136,17 @@ def cmd_sub(ctx: Ctx) -> str:
             return M.request_ack_late(request.class_name, service_date)
         return M.request_ack_after_hours(request.class_name, service_date)
 
-    # Acknowledge before asking anyone. send_next_batch may itself text the
-    # teacher (when nobody is eligible at all), and "I couldn't find a sub"
-    # arriving ahead of "Got it" reads as a malfunction.
-    ctx.gateway.send(ctx.person.phone, M.request_ack(request.class_name, service_date))
+    ack = M.request_ack(request.class_name, service_date)
+
+    # If nobody can be asked, reply with the acknowledgment alone and let the
+    # tick report "unfilled" after a grace period. Sending both in the same
+    # instant lets Twilio deliver "I couldn't find a sub" ahead of "Got it",
+    # which reads as a malfunction.
+    if not eligible(ctx.session, request):
+        return ack
+
+    # Offers go to other people, so their order relative to the ack is moot.
+    ctx.gateway.send(ctx.person.phone, ack)
     ctx.filler.send_next_batch(ctx.session, request)
     return None
 

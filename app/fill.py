@@ -236,6 +236,7 @@ class Filler:
             select(Request).where(Request.status == OPEN).order_by(Request.service_date)
         ).all()
 
+        now = self.clock.now()
         for request in open_requests:
             if request.service_date < self.today():
                 request.status = UNFILLED
@@ -246,6 +247,10 @@ class Filler:
                 )
             )
             if outstanding:
+                continue
+            # A brand-new request nobody has been asked about yet: give the
+            # teacher's "Got it" a head start before any follow-up lands.
+            if not request.offers and now - request.created_at < self.config.ack_grace:
                 continue
             self.send_next_batch(session, request)
 

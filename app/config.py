@@ -63,6 +63,11 @@ class Config:
     inbound_mode: str = "webhook"
     poll_seconds: int = 20
 
+    # Minimum age of a request before the tick may declare it unfilled. Keeps
+    # "I couldn't find a sub" from being sent in the same instant as "Got it";
+    # Twilio does not preserve order between messages sent in the same second.
+    ack_grace: timedelta = timedelta(seconds=30)
+
     # Saturday admin nudges (local time).
     digest_at: time = time(17, 0)
     last_call_at: time = time(20, 0)

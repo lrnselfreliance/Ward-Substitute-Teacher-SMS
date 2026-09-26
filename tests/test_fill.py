@@ -206,3 +206,21 @@ def test_non_responder_does_not_monopolise_the_front(staffed):
     # The ghost is asked, but no more often than anyone else.
     assert seen_counts[ghost] <= max(seen_counts.values())
     assert seen_counts[ghost] >= 1
+
+
+def test_empty_roster_ack_arrives_before_unfilled(app):
+    """Twilio does not order same-second sends, so the two must be separated."""
+    app.enroll(TEACHER, "Tom", teacher=True, substitute=False, class_name="3rd grade")
+
+    app.sms(TEACHER, "SUB 3/15")
+    assert [m.body for m in app.gateway.to(TEACHER)][-1].startswith("Got it")
+    assert app.gateway.count_to(TEACHER) == 1
+
+    app.tick()  # inside the grace period: nothing more yet
+    assert app.gateway.count_to(TEACHER) == 1
+
+    app.advance(seconds=31)
+    app.tick()
+    assert "couldn't find a sub" in app.last(TEACHER)
+    with app.session_factory() as session:
+        assert session.scalar(select(Request)).status == UNFILLED
