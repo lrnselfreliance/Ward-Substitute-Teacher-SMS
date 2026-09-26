@@ -75,6 +75,19 @@ Cost is latency: a member's reply is processed within one poll interval rather
 than instantly. At 20 seconds, against a scheduler whose tightest deadline is a
 45-minute batch, that is not a real cost.
 
+**Silence Twilio's default auto-reply.** A new number's SMS webhook points at
+Twilio's demo URL, which answers every inbound text with "Thanks for the
+message. Configure your number's SMS URL..." before the app ever replies. In
+poll mode nothing registers a webhook, so that default stays. Point the
+number's Messaging URL at an empty TwiML document instead:
+
+```
+https://twimlets.com/echo?Twiml=%3CResponse%3E%3C%2FResponse%3E   (GET)
+```
+
+Set it in the console under the number's Messaging configuration, or via the
+API with `incoming_phone_numbers(sid).update(sms_url=..., sms_method="GET")`.
+
 Correctness comes from the same `MessageSid` dedupe that guards webhook
 retries, so overlapping poll windows are harmless. The first poll against an
 existing number **absorbs history without acting on it** — otherwise switching
