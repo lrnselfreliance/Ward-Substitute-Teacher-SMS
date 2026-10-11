@@ -8,11 +8,19 @@ opted into that.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 
 SEGMENT = 160
 
 ORDINALS = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th", 5: "5th"}
+
+
+def clock_time(t: time) -> str:
+    """08:00 -> '8am', 21:30 -> '9:30pm'. For copy that mentions quiet hours,
+    so a changed window never leaves the texts describing the old one."""
+    hour = t.hour % 12 or 12
+    suffix = "am" if t.hour < 12 else "pm"
+    return f"{hour}{suffix}" if t.minute == 0 else f"{hour}:{t.minute:02d}{suffix}"
 
 
 def pretty_date(d: date) -> str:
@@ -124,15 +132,15 @@ def request_ack(class_name: str | None, d: date) -> str:
     return f"Got it - sub needed for {what} on {pretty_date(d)}. I'll text you when someone accepts."
 
 
-def request_ack_after_hours(class_name: str | None, d: date) -> str:
+def request_ack_after_hours(class_name: str | None, d: date, resume: time) -> str:
     what = class_name or "your class"
     return (
         f"Got it - sub needed for {what} on {pretty_date(d)}. "
-        "It's after hours, so I'll start asking at 8am."
+        f"It's after hours, so I'll start asking at {clock_time(resume)}."
     )
 
 
-def request_ack_late(class_name: str | None, d: date) -> str:
+def request_ack_late(class_name: str | None, d: date, resume: time) -> str:
     """Two segments, deliberately. Honesty beats brevity here.
 
     A teacher who asks during Saturday quiet hours has left about an hour of
@@ -142,7 +150,7 @@ def request_ack_late(class_name: str | None, d: date) -> str:
     what = class_name or "your class"
     return (
         f"Got it - sub needed for {what} on {pretty_date(d)}. It's after hours so I "
-        "can't start asking until 8am, which may not be enough time. I'd suggest "
+        f"can't start asking until {clock_time(resume)}, which may not be enough time. I'd suggest "
         "calling someone directly tonight. I'll still try and will text you if "
         "anyone accepts."
     )
@@ -244,7 +252,11 @@ def stopped(org: str) -> str:
 
 UNKNOWN = "Sorry, I didn't understand. Text HELP for what I can do."
 
-QUIET_BROADCAST = "Broadcasts only go out 8am-9pm. Try again in the morning."
+def quiet_broadcast(start: time, end: time) -> str:
+    return (
+        f"Broadcasts only go out {clock_time(end)}-{clock_time(start)}. "
+        "Try again in the morning."
+    )
 
 
 # -- safety switches -------------------------------------------------------
@@ -316,8 +328,10 @@ ADMIN_USAGE = (
 )
 
 
-def admin_guide(org: str) -> str:
+def admin_guide(org: str, quiet_start: time, quiet_end: time) -> str:
     """Plain-English walkthrough for non-technical leaders. Long by design."""
+    waking = f"{clock_time(quiet_end)}-{clock_time(quiet_start)}"
+    quiet = f"{clock_time(quiet_start)}-{clock_time(quiet_end)}"
     return "\n".join(
         [
             f"{org} leader guide. Start every command with ADMIN.",
@@ -332,7 +346,7 @@ def admin_guide(org: str) -> str:
             "ADMIN FILL 10/18 sam - record a sub you arranged in person, so the "
             "rotation stays fair",
             "ADMIN MOVE <old phone> <new phone> - someone got a new number",
-            "ADMIN BROADCAST <message> - text everyone (8am-9pm only)",
+            f"ADMIN BROADCAST <message> - text everyone ({waking} only)",
             "ADMIN CANCEL 10/18 nursery - withdraw a teacher's request",
             "",
             "If something goes wrong:",
@@ -343,7 +357,7 @@ def admin_guide(org: str) -> str:
             "someone who never signed up. Admins can't be banned by text.",
             "",
             "Subs are asked a few at a time, longest-since-served first, with "
-            "more asked as Sunday gets closer. Nothing is sent 9pm-8am. You are "
+            f"more asked as Sunday gets closer. Nothing is sent {quiet}. You are "
             "texted automatically when a request cannot be filled.",
         ]
     )
@@ -370,11 +384,6 @@ def help_for(person, org: str) -> str:
     return "\n".join(lines)
 
 
-def help_stranger(org: str) -> str:
-    return (
-        f"{org} Substitute Finder: text JOIN to sign up as a teacher or "
-        f"substitute. {HELP_FOOTER}"
-    )
 
 
 # -- admin pushes ----------------------------------------------------------
@@ -387,18 +396,13 @@ def admin_unfilled(org: str, class_name: str | None, d: date, teacher: str) -> s
     )
 
 
-def admin_short_notice(org: str, class_name: str | None, d: date, teacher: str) -> str:
-    return (
-        f"{org}: Short notice - {teacher} needs a sub for "
-        f"{class_name or 'class'} on {pretty_date(d)}."
-    )
 
 
-def admin_last_call(org: str, items: list[str]) -> str:
+def admin_last_call(org: str, items: list[str], quiet_start: time, quiet_end: time) -> str:
     body = "; ".join(items)
     return (
-        f"{org}: Still no sub for {body}. I stop texting at 9pm and resume at "
-        "8am - you may want to make some calls tonight."
+        f"{org}: Still no sub for {body}. I stop texting at {clock_time(quiet_start)} "
+        f"and resume at {clock_time(quiet_end)} - you may want to make some calls tonight."
     )
 
 

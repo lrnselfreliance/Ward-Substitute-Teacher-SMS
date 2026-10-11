@@ -8,7 +8,7 @@ so anything longer must be a deliberate, listed exception.
 from __future__ import annotations
 
 import inspect
-from datetime import date
+from datetime import date, time
 
 import pytest
 
@@ -71,12 +71,12 @@ RENDERED = {
     "RESUMED": M.RESUMED,
     "stopped": M.stopped(ORG),
     "UNKNOWN": M.UNKNOWN,
-    "QUIET_BROADCAST": M.QUIET_BROADCAST,
+    "quiet_broadcast": M.quiet_broadcast(time(21, 0), time(8, 0)),
     "NEED_CLASS": M.NEED_CLASS,
     "NO_SUCH_REQUEST": M.NO_SUCH_REQUEST,
     "confirm": M.confirm(_Person()),
     "request_ack": M.request_ack("3rd grade", SUNDAY),
-    "request_ack_after_hours": M.request_ack_after_hours("3rd grade", SUNDAY),
+    "request_ack_after_hours": M.request_ack_after_hours("3rd grade", SUNDAY, time(8, 0)),
     "offer": M.offer(ORG, "Tom Teacher", "3rd grade", SUNDAY, None),
     "accepted_sub": M.accepted_sub(
         ORG, "Tom Teacher", "+15551234567", "3rd grade", SUNDAY
@@ -87,9 +87,6 @@ RENDERED = {
     "class_set": M.class_set("5th grade"),
     "sundays_set": M.sundays_set(0b10101),
     "admin_unfilled": M.admin_unfilled(ORG, "3rd grade", SUNDAY, "Tom Teacher"),
-    "admin_short_notice": M.admin_short_notice(
-        ORG, "3rd grade", SUNDAY, "Tom Teacher"
-    ),
 }
 
 
@@ -102,7 +99,7 @@ def test_fits_one_segment(name, text):
 
 
 def test_long_message_is_a_declared_exception():
-    text = M.request_ack_late("3rd grade", SUNDAY)
+    text = M.request_ack_late("3rd grade", SUNDAY, time(8, 0))
     assert len(text) > M.SEGMENT
     assert "request_ack_late" in MULTI_SEGMENT_BY_DESIGN
 
@@ -133,7 +130,7 @@ def test_every_public_message_is_covered():
         if not name.startswith("_")
         and inspect.isfunction(value)
         and name not in {"pretty_date", "pretty_sundays", "describe", "help_for",
-                         "help_stranger"}
+                         "clock_time"}
     }
     missing = (public | functions) - set(RENDERED) - MULTI_SEGMENT_BY_DESIGN
     # NOT_SUNDAY is a template filled in at call time.
@@ -162,7 +159,7 @@ BRANDED = {
     "unbanned_notice": M.unbanned_notice(ORG, "Ada", "Sam"),
     "cancelled_on_behalf": M.cancelled_on_behalf(ORG, "Ada", SUNDAY),
     "admin_digest": M.admin_digest(ORG, ["3rd grade (Tom)"]),
-    "admin_last_call": M.admin_last_call(ORG, ["3rd grade (Tom)"]),
+    "admin_last_call": M.admin_last_call(ORG, ["3rd grade (Tom)"], time(21, 0), time(8, 0)),
 }
 
 
@@ -188,3 +185,13 @@ def test_opt_in_confirmation_has_everything_the_campaign_promises(text):
 def test_the_offer_repeats_the_opt_out():
     """The most frequently received unsolicited message carries STOP."""
     assert "STOP" in M.offer(ORG, "Tom", "3rd grade", SUNDAY, None)
+
+
+def test_quiet_hour_copy_follows_the_configured_window():
+    assert M.clock_time(time(8, 0)) == "8am"
+    assert M.clock_time(time(21, 30)) == "9:30pm"
+    assert M.clock_time(time(0, 0)) == "12am"
+    assert "7:30am" in M.request_ack_after_hours("x", SUNDAY, time(7, 30))
+    assert "10pm" in M.admin_last_call(ORG, ["x"], time(22, 0), time(7, 30))
+    assert "7:30am-10pm" in M.quiet_broadcast(time(22, 0), time(7, 30))
+    assert "10pm-7:30am" in M.admin_guide(ORG, time(22, 0), time(7, 30))

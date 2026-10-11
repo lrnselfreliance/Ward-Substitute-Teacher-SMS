@@ -124,14 +124,3 @@ def eligible(session: Session, request: Request) -> list[Person]:
     candidates.sort(key=lambda c: c.sort_key(request.id))
     return [c.person for c in candidates]
 
-
-def exhausted(session: Session, request: Request) -> bool:
-    """No one left to ask and nothing outstanding."""
-    if eligible(session, request):
-        return False
-    pending = session.scalar(
-        select(func.count(Offer.id)).where(
-            Offer.request_id == request.id, Offer.status == PENDING
-        )
-    )
-    return not pending

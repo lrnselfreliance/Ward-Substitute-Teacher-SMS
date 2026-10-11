@@ -18,18 +18,26 @@ from app.config import Config
 from app.conversation import Router
 from app.db import make_engine, make_session_factory
 from app.fill import Filler
-from app.gateway import FakeGateway, GuardedGateway
+from app.gateway import FakeGateway, GuardedGateway, TwilioGateway
 from app.halt import clear_halt, halted, set_halt
 from app.messages import describe
 from app.models import DONE, Person, Request
 from app.ranking import eligible
 
 
-def _wire(config: Config):
+def _wire(config: Config, *, real_sms: bool = False):
+    """real_sms=True sends through Twilio when configured. Everything else
+    uses the fake, which prints instead of sending."""
     engine = make_engine(config.db_path)
     session_factory = make_session_factory(engine)
     clock = SystemClock()
-    gateway = GuardedGateway(FakeGateway(clock=clock), session_factory)
+    if real_sms and config.twilio_configured:
+        inner = TwilioGateway(
+            config.twilio_account_sid, config.twilio_auth_token, config.twilio_from
+        )
+    else:
+        inner = FakeGateway(clock=clock)
+    gateway = GuardedGateway(inner, session_factory, config.db_path)
     filler = Filler(session_factory, gateway, clock, config)
     router = Router(session_factory, gateway, clock, config, filler)
     return session_factory, gateway, clock, filler, router
@@ -132,24 +140,42 @@ def cmd_status(args, config):
 
 
 def cmd_ban(args, config):
-    session_factory, *_ = _wire(config)
+    # Real SMS: banning withdraws their offers and requests, and the people
+    # already asked must actually be told to stand down.
+    session_factory, gateway, clock, filler, router = _wire(config, real_sms=True)
     phone = normalize_phone(args.phone)
     with session_factory() as session:
         person = session.scalar(select(Person).where(Person.phone == phone))
         if person is None:
             person = Person(phone=phone, enroll_state="ask_consent", active=False,
-                            sundays=0, created_at=SystemClock().now())
+                            sundays=0, created_at=clock.now())
             session.add(person)
+            session.flush()
         person.banned = not args.remove
-        person.banned_at = None if args.remove else SystemClock().now()
+        person.banned_at = None if args.remove else clock.now()
         person.ban_reason = None if args.remove else (" ".join(args.reason) or None)
         person.banned_by_id = None
+        if person.banned:
+            filler.withdraw(session, person)
         session.commit()
         print(f"{person.name or phone}: banned={person.banned}")
 
 
+def _refuse_live(args, config) -> None:
+    """simulate and tick write real rows but send through a fake gateway.
+    Against the database the server is using, that leaves state the server
+    then acts on (or thinks it already did). Require an explicit opt-in."""
+    if args.db is None and not args.live:
+        sys.exit(
+            f"refusing to run against the configured database ({config.db_path}).\n"
+            "Pass --db <copy.db> to use a scratch copy, or --live if you really "
+            "mean the running service's data."
+        )
+
+
 def cmd_simulate(args, config):
     """Send a message as if it arrived from a phone, and print the replies."""
+    _refuse_live(args, config)
     session_factory, gateway, clock, filler, router = _wire(config)
     phone = normalize_phone(args.phone)
     router.handle(phone, " ".join(args.text))
@@ -158,6 +184,7 @@ def cmd_simulate(args, config):
 
 
 def cmd_tick(args, config):
+    _refuse_live(args, config)
     session_factory, gateway, clock, filler, router = _wire(config)
     filler.tick()
     for msg in gateway.sent:
@@ -173,7 +200,9 @@ def main(argv=None) -> None:
 
     sub.add_parser("people").set_defaults(func=cmd_people)
     sub.add_parser("requests").set_defaults(func=cmd_requests)
-    sub.add_parser("tick").set_defaults(func=cmd_tick)
+    p = sub.add_parser("tick", help="run one scheduler tick (scratch DB only unless --live)")
+    p.add_argument("--live", action="store_true")
+    p.set_defaults(func=cmd_tick)
     sub.add_parser("status", help="halt state and bans").set_defaults(func=cmd_status)
     sub.add_parser("unhalt", help="lift an emergency stop").set_defaults(func=cmd_unhalt)
 
@@ -200,7 +229,8 @@ def main(argv=None) -> None:
     p.add_argument("--remove", action="store_true")
     p.set_defaults(func=cmd_admin)
 
-    p = sub.add_parser("simulate", help="drive a conversation locally")
+    p = sub.add_parser("simulate", help="drive a conversation locally (scratch DB only unless --live)")
+    p.add_argument("--live", action="store_true")
     p.add_argument("phone")
     p.add_argument("text", nargs="+")
     p.set_defaults(func=cmd_simulate)

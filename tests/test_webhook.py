@@ -22,6 +22,7 @@ TZ = ZoneInfo("America/Denver")
 def _config(**overrides) -> Config:
     base = dict(db_path=":memory:", timezone=TZ, validate_signature=False)
     base.update(overrides)
+    base.setdefault("inbound_mode", "webhook")  # these tests exercise the endpoint
     return Config(**base)
 
 

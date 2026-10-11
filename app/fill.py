@@ -14,6 +14,7 @@ from . import messages as M
 from .clock import Clock, to_local, to_utc
 from .config import Config, tier_for
 from .halt import halted
+from .monitor import with_param
 from .models import (
     CANCELLED,
     EXPIRED,
@@ -179,7 +180,7 @@ class Filler:
     def send_next_batch(self, session: Session, request: Request) -> int:
         """Ask the next tier-sized group. Returns how many were asked.
 
-        Refuses to send during quiet hours -- the tick will call again at 8am.
+        Refuses to send during quiet hours -- the tick will call again when they end.
         """
         now = self.clock.now()
         if self.quiet.is_quiet(now):
@@ -360,7 +361,7 @@ class Filler:
         return int(inbound or 0) + int(outbound or 0)
 
     def _ping_activity(self, count: int) -> None:
-        url = f"{self.config.activity_url}&ping={count}"
+        url = with_param(self.config.activity_url, "ping", str(count))
         try:
             urllib.request.urlopen(url, timeout=5).close()
         except Exception as exc:  # monitoring must never break the tick
@@ -449,5 +450,9 @@ class Filler:
             rows = existing_at(self.config.last_call_at)
             if rows and self._once(session, "sat_last_call", key):
                 self.notify_admins(
-                    session, M.admin_last_call(self.config.org_name, label(rows))
+                    session,
+                    M.admin_last_call(
+                        self.config.org_name, label(rows),
+                        self.config.quiet_start, self.config.quiet_end,
+                    ),
                 )

@@ -18,8 +18,8 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 Drive real conversations against a local database:
 
 ```bash
-export DB_PATH=./data/substitute.db TZ=America/Denver
-S=".venv/bin/python -m cli.subctl"
+export TZ=America/Denver
+S=".venv/bin/python -m cli.subctl --db ./data/scratch.db"
 
 $S simulate +15551110001 hi
 $S simulate +15551110001 yes          # consent gate comes first
@@ -36,7 +36,10 @@ $S people
 ```
 
 `simulate` runs the real router against a fake gateway and prints what would
-have been texted.
+have been texted. It and `tick` refuse to run against the configured live
+database unless you pass `--live`: they write real rows but send nothing, which
+would leave the running service acting on conversations that never happened.
+Point them at a scratch copy with `--db`.
 
 ## Running it
 

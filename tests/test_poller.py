@@ -121,7 +121,8 @@ def test_poll_mode_exposes_no_webhook():
 
 def test_webhook_mode_still_serves_the_endpoint():
     api = create_app(
-        Config(db_path=":memory:", timezone=TZ, validate_signature=False),
+        Config(db_path=":memory:", timezone=TZ, validate_signature=False,
+               inbound_mode="webhook"),
         run_scheduler=False,
     )
     with TestClient(api) as client:
@@ -221,3 +222,41 @@ def test_poll_mode_checks_the_number_is_on_the_account(monkeypatch):
                  twilio_account_sid="ACx", twilio_auth_token="t", twilio_from="+15550000000")
     with pytest.raises(RuntimeError, match="not a number on this Twilio account"):
         main_mod.build(cfg)
+
+
+def test_default_mode_is_poll_and_docs_are_off():
+    """A container started without its env file must not expose an endpoint."""
+    cfg = Config(db_path=":memory:", timezone=TZ)
+    assert cfg.polling
+    api = create_app(cfg, run_scheduler=False)
+    with TestClient(api) as client:
+        for path in ("/docs", "/redoc", "/openapi.json", "/sms"):
+            assert client.get(path).status_code == 404, path
+
+
+def test_push_urls_are_joined_whatever_their_shape():
+    from app.monitor import with_param
+
+    assert with_param("http://k/api/push/T", "ping", "5") == "http://k/api/push/T?ping=5"
+    assert with_param("http://k/api/push/T?status=up&msg=OK", "ping", "5").endswith("&ping=5")
+    assert with_param("http://k/api/push/T?status=up&msg=OK", "msg", "HALTED") == \
+        "http://k/api/push/T?status=up&msg=HALTED"
+
+
+def test_subctl_refuses_the_live_database_for_simulate_and_tick(tmp_path, monkeypatch, capsys):
+    import pytest
+
+    from cli.subctl import main
+
+    live = str(tmp_path / "live.db")
+    monkeypatch.setenv("DB_PATH", live)
+    with pytest.raises(SystemExit) as exc:
+        main(["simulate", "+15551110001", "hi"])
+    assert "refusing" in str(exc.value)
+    with pytest.raises(SystemExit):
+        main(["tick"])
+
+    # A scratch copy or an explicit --live is fine.
+    main(["--db", str(tmp_path / "scratch.db"), "simulate", "+15551110001", "hi"])
+    assert "consent" in capsys.readouterr().out.lower()
+    main(["tick", "--live"])

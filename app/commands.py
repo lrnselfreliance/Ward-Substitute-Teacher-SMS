@@ -154,8 +154,8 @@ def _file_request(
     if ctx.filler.quiet.is_quiet(ctx.clock.now()):
         days = (service_date - ctx.today).days
         if days <= 1:
-            return M.request_ack_late(label, service_date)
-        return M.request_ack_after_hours(label, service_date)
+            return M.request_ack_late(label, service_date, ctx.config.quiet_end)
+        return M.request_ack_after_hours(label, service_date, ctx.config.quiet_end)
 
     ack = M.request_ack(label, service_date)
 
@@ -352,7 +352,7 @@ def cmd_admin(ctx: Ctx) -> str:
 
 
 def admin_help(ctx: Ctx) -> str:
-    return M.admin_guide(ctx.config.org_name)
+    return M.admin_guide(ctx.config.org_name, ctx.config.quiet_start, ctx.config.quiet_end)
 
 
 def admin_sub(ctx: Ctx) -> str:
@@ -585,7 +585,7 @@ def admin_broadcast(ctx: Ctx) -> str:
     if not body:
         return "ADMIN BROADCAST <message>"
     if ctx.filler.quiet.is_quiet(ctx.clock.now()):
-        return M.QUIET_BROADCAST
+        return M.quiet_broadcast(ctx.config.quiet_start, ctx.config.quiet_end)
     people = ctx.session.scalars(
         select(Person).where(Person.enroll_state == DONE, Person.id != ctx.person.id)
     ).all()

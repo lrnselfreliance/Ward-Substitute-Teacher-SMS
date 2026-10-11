@@ -25,6 +25,7 @@ from typing import Protocol
 from sqlalchemy import select
 
 from .models import Notice, ProcessedMessage
+from .monitor import with_param
 
 log = logging.getLogger(__name__)
 
@@ -155,7 +156,7 @@ class Poller:
             return
         url = self.heartbeat_url
         if self.halted and self.halted():
-            url = url.replace("msg=OK", "msg=HALTED")
+            url = with_param(url, "msg", "HALTED")
         try:
             urllib.request.urlopen(url, timeout=5).close()
         except Exception as exc:  # monitoring must never break the thing monitored

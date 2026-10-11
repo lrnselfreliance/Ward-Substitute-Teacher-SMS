@@ -117,7 +117,9 @@ def create_app(config: Config | None = None, *, run_scheduler: bool = True) -> F
             if scheduler:
                 scheduler.shutdown(wait=False)
 
-    api = FastAPI(lifespan=lifespan)
+    # No interactive docs: the only route is a webhook, and the schema would
+    # merely advertise it.
+    api = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
     # Handy for tests and the CLI to reach the same wiring.
     api.state.config = config

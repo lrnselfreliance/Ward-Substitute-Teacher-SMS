@@ -70,9 +70,11 @@ class Config:
     # the last 24h>, so its chart doubles as a usage graph.
     activity_url: str | None = None
 
-    # "webhook" -> Twilio POSTs to us, needs a public HTTPS URL.
     # "poll"    -> we ask Twilio for new messages, needs no inbound access.
-    inbound_mode: str = "webhook"
+    # "webhook" -> Twilio POSTs to us, needs a public HTTPS URL.
+    # Poll is the default so a container started without its env file never
+    # exposes an endpoint by accident.
+    inbound_mode: str = "poll"
     poll_seconds: int = 20
 
     # Minimum age of a request before the tick may declare it unfilled. Keeps
@@ -100,7 +102,7 @@ class Config:
             validate_signature=os.environ.get("VALIDATE_SIGNATURE", "1") != "0",
             heartbeat_url=os.environ.get("HEARTBEAT_URL") or None,
             activity_url=os.environ.get("ACTIVITY_URL") or None,
-            inbound_mode=os.environ.get("INBOUND_MODE", "webhook").lower(),
+            inbound_mode=os.environ.get("INBOUND_MODE", "poll").lower(),
             poll_seconds=int(os.environ.get("POLL_SECONDS", "20")),
         )
 
