@@ -228,6 +228,18 @@ cli/subctl.py
 tests/
 ```
 
+## Monitoring
+
+Set `HEARTBEAT_URL` to an Uptime Kuma push-monitor URL and the poller pings it
+after every successful Twilio fetch. Give the monitor a short window (two
+minutes with a few retries) and it will alert when polling stops for any
+reason: container down, scheduler stalled, internet out, or credentials
+revoked. A plain "is the container running" check misses most of those.
+
+For backups, have whatever job copies `data/backups/` off the machine ping a
+second push monitor with a window of about 26 hours, so a silent copy failure
+also alerts. Test a restore once with `subctl --db <snapshot> people`.
+
 ## Policies
 
 `docs/` holds the public Privacy Policy and Terms required for A2P 10DLC

@@ -67,7 +67,10 @@ def build(config: Config):
             session_factory,
             clock,
             lookback=timedelta(seconds=max(600, config.poll_seconds * 10)),
+            heartbeat_url=config.heartbeat_url,
         )
+        if config.heartbeat_url:
+            log.info("heartbeat enabled")
 
     return session_factory, gateway, clock, filler, router, poller
 

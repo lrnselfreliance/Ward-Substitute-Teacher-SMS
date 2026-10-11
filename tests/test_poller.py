@@ -155,3 +155,39 @@ def test_twilio_clients_carry_a_timeout():
 
     client = twilio_client("ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "token")
     assert client.http_client.timeout == HTTP_TIMEOUT
+
+
+def test_heartbeat_fires_only_after_a_successful_fetch(polled, monkeypatch):
+    import app.poller as P
+
+    hits = []
+
+    class _Resp:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(P.urllib.request, "urlopen", lambda url, timeout: hits.append(url) or _Resp())
+    polled.poller.heartbeat_url = "http://kuma/api/push/abc?status=up"
+
+    polled.poller.poll()
+    assert hits == ["http://kuma/api/push/abc?status=up"]
+
+    class Broken:
+        def fetch(self, since):
+            raise ConnectionError("down")
+
+    polled.poller.inbox = Broken()
+    polled.poller.poll()
+    assert len(hits) == 1  # no heartbeat when the fetch failed
+
+
+def test_heartbeat_failure_does_not_break_polling(polled, monkeypatch):
+    import app.poller as P
+
+    def boom(url, timeout):
+        raise OSError("kuma unreachable")
+
+    monkeypatch.setattr(P.urllib.request, "urlopen", boom)
+    polled.poller.heartbeat_url = "http://kuma/api/push/abc"
+    polled.inbox.deliver(TEACHER, "SUB 3/15", polled.clock.now())
+    assert polled.poller.poll() == 1

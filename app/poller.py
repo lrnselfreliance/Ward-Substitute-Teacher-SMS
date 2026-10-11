@@ -17,6 +17,7 @@ webhook retries makes overlapping poll windows harmless.
 from __future__ import annotations
 
 import logging
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Protocol
@@ -95,12 +96,14 @@ class Poller:
         session_factory,
         clock,
         lookback: timedelta = timedelta(minutes=10),
+        heartbeat_url: str | None = None,
     ) -> None:
         self.inbox = inbox
         self.router = router
         self.session_factory = session_factory
         self.clock = clock
         self.lookback = lookback
+        self.heartbeat_url = heartbeat_url
 
     def poll(self) -> int:
         """Fetch and dispatch new inbound messages. Returns how many ran."""
@@ -118,6 +121,7 @@ class Poller:
             log.exception("inbox fetch failed")
             return 0
         self._mark_ok(now)
+        self._heartbeat()
 
         if self._bootstrap(messages):
             return 0
@@ -129,6 +133,15 @@ class Poller:
             self.router.handle(message.from_, message.body, message.sid)
             handled += 1
         return handled
+
+    def _heartbeat(self) -> None:
+        """Tell the uptime monitor the poll loop is alive. Never raises."""
+        if not self.heartbeat_url:
+            return
+        try:
+            urllib.request.urlopen(self.heartbeat_url, timeout=5).close()
+        except Exception as exc:  # monitoring must never break the thing monitored
+            log.warning("heartbeat failed: %s", exc)
 
     def _last_ok(self) -> datetime | None:
         with self.session_factory() as session:

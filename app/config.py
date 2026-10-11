@@ -58,6 +58,11 @@ class Config:
     public_url: str | None = None
     validate_signature: bool = True
 
+    # Optional Uptime Kuma "push" monitor URL. Pinged after every successful
+    # Twilio fetch, so silence means the poll loop is not actually working --
+    # a stronger signal than "the container is up".
+    heartbeat_url: str | None = None
+
     # "webhook" -> Twilio POSTs to us, needs a public HTTPS URL.
     # "poll"    -> we ask Twilio for new messages, needs no inbound access.
     inbound_mode: str = "webhook"
@@ -86,6 +91,7 @@ class Config:
             twilio_from=os.environ.get("TWILIO_FROM"),
             public_url=os.environ.get("PUBLIC_URL"),
             validate_signature=os.environ.get("VALIDATE_SIGNATURE", "1") != "0",
+            heartbeat_url=os.environ.get("HEARTBEAT_URL") or None,
             inbound_mode=os.environ.get("INBOUND_MODE", "webhook").lower(),
             poll_seconds=int(os.environ.get("POLL_SECONDS", "20")),
         )
