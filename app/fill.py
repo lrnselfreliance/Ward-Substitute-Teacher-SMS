@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 from datetime import date, time, timedelta
 
-from sqlalchemy import select, update
+import urllib.request
+
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from . import messages as M
@@ -23,7 +25,9 @@ from .models import (
     Notice,
     Offer,
     Person,
+    ProcessedMessage,
     Request,
+    SentMessage,
 )
 from .quiet import QuietHours
 from .ranking import eligible
@@ -272,7 +276,9 @@ class Filler:
                 refresh = getattr(self.gateway, "refresh", None)
                 if refresh:
                     refresh(session)
+                self._record_activity(session)
                 if halted(session):
+                    session.commit()
                     return
                 self._expire_offers(session)
                 self._advance_open_requests(session)
@@ -281,6 +287,39 @@ class Filler:
             except Exception:
                 session.rollback()
                 log.exception("tick failed")
+
+    def _record_activity(self, session: Session) -> None:
+        """Persist outbound sends, prune old ones, and report the trailing
+        24-hour message count to the activity monitor if one is configured."""
+        now = self.clock.now()
+        drain = getattr(self.gateway, "drain", None)
+        if drain:
+            drain(session, now)
+        session.execute(
+            delete(SentMessage).where(SentMessage.sent_at < now - timedelta(days=60))
+        )
+        if not self.config.activity_url:
+            return
+        self._ping_activity(self.messages_last_24h(session))
+
+    def messages_last_24h(self, session: Session) -> int:
+        since = self.clock.now() - timedelta(hours=24)
+        inbound = session.scalar(
+            select(func.count(ProcessedMessage.sid)).where(
+                ProcessedMessage.received_at >= since
+            )
+        )
+        outbound = session.scalar(
+            select(func.count(SentMessage.id)).where(SentMessage.sent_at >= since)
+        )
+        return int(inbound or 0) + int(outbound or 0)
+
+    def _ping_activity(self, count: int) -> None:
+        url = f"{self.config.activity_url}&ping={count}"
+        try:
+            urllib.request.urlopen(url, timeout=5).close()
+        except Exception as exc:  # monitoring must never break the tick
+            log.warning("activity ping failed: %s", exc)
 
     def _expire_offers(self, session: Session) -> None:
         now = self.clock.now()

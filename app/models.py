@@ -198,6 +198,17 @@ class DroppedMessage(Base):
     received_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
 
+class SentMessage(Base):
+    """One row per outbound text: recipient and time only, no body. Feeds
+    the activity statistic and nothing else; pruned after 60 days."""
+
+    __tablename__ = "sent_message"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    to: Mapped[str] = mapped_column(String(20))
+    sent_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+
+
 class Notice(Base):
     """Guards once-per-occasion pushes (Saturday digest, last call)."""
 

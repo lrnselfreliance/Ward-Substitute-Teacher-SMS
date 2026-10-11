@@ -224,3 +224,22 @@ def test_empty_roster_ack_arrives_before_unfilled(app):
     assert "couldn't find a sub" in app.last(TEACHER)
     with app.session_factory() as session:
         assert session.scalar(select(Request)).status == UNFILLED
+
+
+def test_activity_counts_both_directions_over_24h(staffed, monkeypatch):
+    import app.fill as F
+
+    pings = []
+    monkeypatch.setattr(F.urllib.request, "urlopen",
+                        lambda url, timeout: pings.append(url) or type("R", (), {"close": lambda s: None})())
+    app = staffed
+    app.config = type(app.config)(**{**app.config.__dict__, "activity_url": "http://kuma/api/push/x?status=up&msg=OK"})
+    app.filler.config = app.config
+
+    app.sms(TEACHER, "SUB 3/15", sid="SM1")   # 1 in, 1 ack + 3 offers out
+    app.tick()
+    assert pings[-1].endswith("&ping=5")
+
+    app.advance(hours=25)
+    app.tick()  # everything has aged out of the window
+    assert pings[-1].endswith("&ping=0")

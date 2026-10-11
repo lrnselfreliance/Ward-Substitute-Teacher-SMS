@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Protocol
 
 log = logging.getLogger(__name__)
@@ -100,6 +100,9 @@ class GuardedGateway:
         self._session_factory = session_factory
         self._halted = False
         self._admin_phones: set[str] = set()
+        # Outbound sends not yet written to the database. The tick drains
+        # this with its own session; opening one per send would be wasteful.
+        self._unrecorded: list[tuple[str, datetime]] = []
         with session_factory() as session:
             self.refresh(session)
 
@@ -130,6 +133,16 @@ class GuardedGateway:
             log.warning("HALTED: dropped message to %s", to)
             return
         self._inner.send(to, body)
+        self._unrecorded.append((to, datetime.now(timezone.utc)))
+
+    def drain(self, session, now: datetime) -> int:
+        """Write buffered sends to SentMessage. Returns how many."""
+        from .models import SentMessage
+
+        pending, self._unrecorded = self._unrecorded, []
+        for to, _at in pending:
+            session.add(SentMessage(to=to, sent_at=now))
+        return len(pending)
 
     def __getattr__(self, name):
         # Test helpers (sent, to, last_to, clear, ...) live on the inner fake.

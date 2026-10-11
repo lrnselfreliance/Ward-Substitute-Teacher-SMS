@@ -259,6 +259,12 @@ minutes with a few retries) and it will alert when polling stops for any
 reason: container down, scheduler stalled, internet out, or credentials
 revoked. A plain "is the container running" check misses most of those.
 
+For a usage graph at a glance, set `ACTIVITY_URL` to a second push monitor.
+Every minute the app reports messages sent plus received in the trailing 24
+hours as that monitor's `ping` value, so Kuma's response-time chart becomes
+a messages-per-day chart and "Ping (Current)" reads as today's volume. Give it
+a five-minute window so it also alerts if the scheduler tick stops.
+
 For backups, have whatever job copies `data/backups/` off the machine ping a
 second push monitor with a window of about 26 hours, so a silent copy failure
 also alerts. Test a restore once with `subctl --db <snapshot> people`.
