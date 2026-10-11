@@ -61,6 +61,23 @@ class Filler:
         for admin in self.admins(session):
             self.gateway.send(admin.phone, body)
 
+    def notify_requester(
+        self, session: Session, request: Request, *, exclude: int | None = None
+    ) -> None:
+        """Tell the admin who filed a request on a teacher's behalf it filled."""
+        admin = request.requested_by
+        if not admin or admin.id == request.teacher_id or admin.id == exclude:
+            return
+        self.gateway.send(
+            admin.phone,
+            M.filled_requester(
+                self.config.org_name,
+                request.filled_by.name,
+                request.teacher.name,
+                request.service_date,
+            ),
+        )
+
     def _once(self, session: Session, kind: str, key: str) -> bool:
         """True the first time this (kind, key) is seen; False afterwards."""
         existing = session.scalar(
@@ -188,6 +205,7 @@ class Filler:
                 self.config.org_name, sub.name, sub.phone, request.service_date
             ),
         )
+        self.notify_requester(session, request)
         session.flush()
         return M.accepted_sub(
             self.config.org_name,

@@ -184,6 +184,23 @@ def accepted_teacher(org: str, sub_name: str, phone: str, d: date) -> str:
 TOO_LATE = "Thanks for replying! That one just got filled by someone else."
 
 
+def request_on_behalf(org: str, admin_name: str, class_name: str | None, d: date) -> str:
+    """Tell a teacher an admin asked for a sub on their behalf."""
+    what = class_name or "your class"
+    return (
+        f"{org}: {admin_name} asked me to find a sub for {what} on "
+        f"{pretty_date(d)}. I'll text you when someone accepts."
+    )
+
+
+def filled_requester(org: str, sub_name: str, teacher_name: str, d: date) -> str:
+    """Close the loop for the admin who filed a request for someone else."""
+    return (
+        f"{org}: {sub_name} will sub for {teacher_name} on {pretty_date(d)}. "
+        "Both have each other's number."
+    )
+
+
 def superseded(org: str) -> str:
     return f"{org}: Never mind - that Sunday is covered now. Thanks!"
 
@@ -242,9 +259,41 @@ HELP_SUB = [
     "PAUSE / RESUME - pause being asked",
 ]
 HELP_ADMIN = [
-    "ADMIN OPEN / SUNDAY <date> / REQUEST <id>",
-    "ADMIN ROSTER / FILL / MOVE / BROADCAST",
+    "ADMIN SUB <date> <teacher> - request for a teacher",
+    "ADMIN OPEN - what still needs a sub",
+    "ADMIN HELP - full guide for leaders",
 ]
+
+ADMIN_USAGE = (
+    "ADMIN SUB <date> <teacher> | OPEN | SUNDAY <date> | REQUEST <id> | "
+    "ROSTER | FILL <date> <name> | MOVE <old> <new> | BROADCAST <msg>. "
+    "Text ADMIN HELP for a plain-English guide."
+)
+
+
+def admin_guide(org: str) -> str:
+    """Plain-English walkthrough for non-technical leaders. Long by design."""
+    return "\n".join(
+        [
+            f"{org} leader guide. Start every command with ADMIN.",
+            "",
+            "ADMIN SUB 10/18 nursery - find a sub for a teacher. Name them by "
+            "first name, last name, class, or last 4 digits of their phone. "
+            "Add a note after, e.g. ADMIN SUB 10/18 jayn out of town",
+            "ADMIN OPEN - every request still waiting for a sub",
+            "ADMIN SUNDAY 10/18 - all requests for that Sunday",
+            "ADMIN REQUEST 12 - who was asked about request #12 and what they said",
+            "ADMIN ROSTER - everyone signed up, with their number for commands",
+            "ADMIN FILL 10/18 sam - record a sub you arranged in person, so the "
+            "rotation stays fair",
+            "ADMIN MOVE <old phone> <new phone> - someone got a new number",
+            "ADMIN BROADCAST <message> - text everyone (8am-9pm only)",
+            "",
+            "Subs are asked a few at a time, longest-since-served first, with "
+            "more asked as Sunday gets closer. Nothing is sent 9pm-8am. You are "
+            "texted automatically when a request cannot be filled.",
+        ]
+    )
 
 
 HELP_FOOTER = "Msg&data rates may apply. Reply STOP to opt out."

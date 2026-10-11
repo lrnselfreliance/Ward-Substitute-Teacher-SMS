@@ -125,9 +125,13 @@ class Request(Base):
     filled_by_id: Mapped[int | None] = mapped_column(ForeignKey("person.id"))
     filled_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    # Set when an admin filed the request on the teacher's behalf, so they can
+    # be told how it turned out. Null when the teacher asked themselves.
+    requested_by_id: Mapped[int | None] = mapped_column(ForeignKey("person.id"))
 
     teacher: Mapped[Person] = relationship(foreign_keys=[teacher_id])
     filled_by: Mapped[Person | None] = relationship(foreign_keys=[filled_by_id])
+    requested_by: Mapped[Person | None] = relationship(foreign_keys=[requested_by_id])
     offers: Mapped[list["Offer"]] = relationship(back_populates="request")
 
     def __repr__(self) -> str:

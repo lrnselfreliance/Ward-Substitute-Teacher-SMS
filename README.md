@@ -123,7 +123,14 @@ sending every batch twice. The `CMD` pins `--workers 1`; leave it.
 | Everyone | `HELP` `STATUS` `PAUSE` `RESUME` `STOP` |
 | Teachers | `SUB <date> [note]` `CANCEL <date>` `WHO` `CLASS <name>` |
 | Substitutes | `YES` `NO` `SUNDAYS 1 3`/`ALL` `MINE` |
-| Admins | `ADMIN OPEN` `SUNDAY <date>` `REQUEST <id>` `ROSTER` `FILL` `MOVE` `BROADCAST` |
+| Admins | `ADMIN HELP` `SUB <date> <teacher>` `OPEN` `SUNDAY <date>` `REQUEST <id>` `ROSTER` `FILL` `MOVE` `BROADCAST` |
+
+`ADMIN HELP` is a plain-English guide written for leaders who are not
+technical. `ADMIN SUB` files a request on a teacher's behalf; the teacher can
+be named by first name, last name, class, last four digits of their phone, or
+the `#number` shown in `ADMIN ROSTER`. When a fragment matches more than one
+person the reply lists them with numbers. The teacher is told who asked, and
+the admin is told when it fills.
 
 Two admin commands keep the data honest and are easy to forget:
 

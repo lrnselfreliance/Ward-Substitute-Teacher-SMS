@@ -23,7 +23,7 @@ from .models import (
     Person,
     Request,
 )
-from .parsers import clean_name, parse_date, parse_sundays, split_command
+from .parsers import clean_name, normalize, parse_date, parse_sundays, split_command
 from .ranking import eligible
 
 
@@ -85,28 +85,36 @@ def _resolve_service_date(ctx: Ctx) -> tuple[date | None, str | None, str]:
     return None, None, "I couldn't read that date. Try SUB 3/15"
 
 
-def cmd_sub(ctx: Ctx) -> str:
-    if not ctx.person.is_teacher:
-        return "Only teachers can request a sub. Text HELP for what you can do."
-    if not ctx.person.class_name:
-        return M.NEED_CLASS
-
-    service_date, note, error = _resolve_service_date(ctx)
-    if error:
-        return error
-
+def _check_sunday(service_date: date, today: date) -> str | None:
     if service_date.weekday() != 6:
         return M.NOT_SUNDAY.format(
             given=service_date.strftime("%b %-d"),
             weekday=service_date.strftime("%A"),
             suggestion=M.pretty_date(nearest_sunday(service_date)),
         )
-    if service_date < ctx.today:
+    if service_date < today:
         return f"{M.pretty_date(service_date)} is in the past."
+    return None
 
+
+def _file_request(
+    ctx: Ctx,
+    teacher: Person,
+    service_date: date,
+    note: str | None,
+    *,
+    on_behalf: bool = False,
+) -> str | None:
+    """Create a request for `teacher` and start the fill loop.
+
+    Returns the reply for whoever is texting (the teacher themselves, or an
+    admin acting for them). Shared by SUB and ADMIN SUB so both paths get the
+    same duplicate checks, quiet-hours handling, and send ordering.
+    """
+    who = teacher.name if on_behalf else "you"
     existing = ctx.session.scalar(
         select(Request).where(
-            Request.teacher_id == ctx.person.id,
+            Request.teacher_id == teacher.id,
             Request.service_date == service_date,
             Request.status.in_([OPEN, FILLED]),
         )
@@ -114,29 +122,40 @@ def cmd_sub(ctx: Ctx) -> str:
     if existing:
         if existing.status == FILLED:
             return (
-                f"{existing.filled_by.name} is already subbing for you on "
+                f"{existing.filled_by.name} is already subbing for {who} on "
                 f"{M.pretty_date(service_date)}."
             )
-        return f"I'm already looking for a sub for you on {M.pretty_date(service_date)}."
+        return f"I'm already looking for a sub for {who} on {M.pretty_date(service_date)}."
 
     request = Request(
-        teacher_id=ctx.person.id,
+        teacher_id=teacher.id,
         service_date=service_date,
-        class_name=ctx.person.class_name,
+        class_name=teacher.class_name,
         note=note,
         status=OPEN,
         created_at=ctx.clock.now(),
+        requested_by_id=ctx.person.id if on_behalf else None,
     )
     ctx.session.add(request)
     ctx.session.flush()
 
+    # The admin's ack names the teacher; the teacher's own ack doesn't need to.
+    label = f"{request.class_name} ({teacher.name})" if on_behalf else request.class_name
+    if on_behalf:
+        ctx.gateway.send(
+            teacher.phone,
+            M.request_on_behalf(
+                ctx.config.org_name, ctx.person.name, request.class_name, service_date
+            ),
+        )
+
     if ctx.filler.quiet.is_quiet(ctx.clock.now()):
         days = (service_date - ctx.today).days
         if days <= 1:
-            return M.request_ack_late(request.class_name, service_date)
-        return M.request_ack_after_hours(request.class_name, service_date)
+            return M.request_ack_late(label, service_date)
+        return M.request_ack_after_hours(label, service_date)
 
-    ack = M.request_ack(request.class_name, service_date)
+    ack = M.request_ack(label, service_date)
 
     # If nobody can be asked, reply with the acknowledgment alone and let the
     # tick report "unfilled" after a grace period. Sending both in the same
@@ -149,6 +168,21 @@ def cmd_sub(ctx: Ctx) -> str:
     ctx.gateway.send(ctx.person.phone, ack)
     ctx.filler.send_next_batch(ctx.session, request)
     return None
+
+
+def cmd_sub(ctx: Ctx) -> str:
+    if not ctx.person.is_teacher:
+        return "Only teachers can request a sub. Text HELP for what you can do."
+    if not ctx.person.class_name:
+        return M.NEED_CLASS
+
+    service_date, note, error = _resolve_service_date(ctx)
+    if error:
+        return error
+    error = _check_sunday(service_date, ctx.today)
+    if error:
+        return error
+    return _file_request(ctx, ctx.person, service_date, note)
 
 
 def cmd_cancel(ctx: Ctx) -> str:
@@ -308,8 +342,81 @@ def cmd_admin(ctx: Ctx) -> str:
     )
     handler = ADMIN_COMMANDS.get(sub)
     if not handler:
-        return "ADMIN OPEN | SUNDAY <date> | REQUEST <id> | ROSTER | FILL | MOVE | BROADCAST"
+        return M.ADMIN_USAGE
     return handler(inner)
+
+
+def admin_help(ctx: Ctx) -> str:
+    return M.admin_guide(ctx.config.org_name)
+
+
+def admin_sub(ctx: Ctx) -> str:
+    """ADMIN SUB <date> <teacher> [note] -- file a request for someone else."""
+    service_date, rest, error = _resolve_service_date(ctx)
+    if error:
+        return "Which Sunday, and for whom? e.g. ADMIN SUB 10/18 nursery"
+    error = _check_sunday(service_date, ctx.today)
+    if error:
+        return error
+
+    who, _, note = (rest or "").partition(" ")
+    if not who:
+        return "Which teacher? e.g. ADMIN SUB 10/18 nursery, or their name or last 4 digits"
+
+    matches = find_people(ctx.session, who, teachers_only=True)
+    if not matches:
+        return f"No teacher matching '{who}'. Try their class, first name, or last 4 digits."
+    if len(matches) > 1:
+        listing = "\n".join(_describe_person(p) for p in matches)
+        pick = matches[0].id
+        return (
+            f"More than one match:\n{listing}\n"
+            f"Reply with the number, e.g. ADMIN SUB {ctx.arg.split()[0]} #{pick}"
+        )
+
+    teacher = matches[0]
+    if not teacher.class_name:
+        return f"{teacher.name} has no class on file. Ask them to text CLASS <name>."
+    return _file_request(ctx, teacher, service_date, note.strip() or None, on_behalf=True)
+
+
+def find_people(session: Session, fragment: str, *, teachers_only: bool = False) -> list[Person]:
+    """Enrolled people matching a short fragment an admin can actually type.
+
+    Accepts a roster number (#12 or 12), the last four digits of a phone, or
+    a word matched against first name, last name, and class. Exact matches
+    on a whole name word or whole class name win over substring matches, so
+    "6a" finds CTR 6a without also dragging in CTR 6b. Returns every match;
+    the caller decides what to do when there is more than one.
+    """
+    frag = normalize(fragment).strip("#")
+    if not frag:
+        return []
+
+    query = select(Person).where(Person.enroll_state == DONE)
+    if teachers_only:
+        query = query.where(Person.is_teacher.is_(True))
+    people = session.scalars(query.order_by(Person.name)).all()
+
+    if frag.isdigit() and len(frag) <= 3:
+        return [p for p in people if p.id == int(frag)]
+    if frag.isdigit() and len(frag) == 4:
+        return [p for p in people if p.phone.endswith(frag)]
+
+    exact, loose = [], []
+    for p in people:
+        name_words = normalize(p.name or "").split()
+        klass = normalize(p.class_name or "")
+        if frag in name_words or frag == klass or frag == normalize(p.name or ""):
+            exact.append(p)
+        elif frag in normalize(p.name or "") or frag in klass:
+            loose.append(p)
+    return exact or loose
+
+
+def _describe_person(p: Person) -> str:
+    klass = f" ({p.class_name})" if p.class_name else ""
+    return f"#{p.id} {p.name}{klass}"
 
 
 def _describe_request(r: Request) -> str:
@@ -374,7 +481,8 @@ def admin_roster(ctx: Ctx) -> str:
                 "" if p.active else " (paused)",
             ]
         )
-        lines.append(f"{p.name} [{flags}] {p.gender} {p.phone}")
+        klass = f" {p.class_name}" if p.is_teacher and p.class_name else ""
+        lines.append(f"#{p.id} {p.name} [{flags}] {p.gender}{klass} {p.phone}")
     return "\n".join(lines)
 
 
@@ -387,11 +495,12 @@ def admin_fill(ctx: Ctx) -> str:
         return "I couldn't read that date."
     name = " ".join(words[1:]).strip()
 
-    person = ctx.session.scalar(
-        select(Person).where(Person.name.ilike(f"%{name}%"), Person.enroll_state == DONE)
-    )
-    if not person:
+    matches = find_people(ctx.session, name)
+    if not matches:
         return f"No enrolled person matching '{name}'."
+    if len(matches) > 1:
+        return "More than one match:\n" + "\n".join(_describe_person(p) for p in matches)
+    person = matches[0]
 
     candidates = ctx.session.scalars(
         select(Request).where(
@@ -414,6 +523,7 @@ def admin_fill(ctx: Ctx) -> str:
             offer.status = SUPERSEDED
             ctx.gateway.send(offer.person.phone, M.superseded(ctx.config.org_name))
     ctx.session.flush()
+    ctx.filler.notify_requester(ctx.session, request, exclude=ctx.person.id)
     return f"Recorded: {person.name} subbing {M.pretty_date(when)}."
 
 
@@ -450,6 +560,8 @@ def admin_broadcast(ctx: Ctx) -> str:
 
 
 ADMIN_COMMANDS = {
+    "HELP": admin_help,
+    "SUB": admin_sub,
     "OPEN": admin_open,
     "SUNDAY": admin_sunday,
     "REQUEST": admin_request,

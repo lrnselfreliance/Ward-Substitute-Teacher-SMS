@@ -31,7 +31,10 @@ class _Person:
 # Deliberately longer than one segment: the honesty is worth the extra cost.
 # consent_prompt carries the frequency/rate/HELP/STOP disclosure carriers
 # expect at the opt-in moment, and is sent once per person.
-MULTI_SEGMENT_BY_DESIGN = {"request_ack_late", "consent_prompt"}
+# admin_guide is a walkthrough for leaders who asked for it; ADMIN_USAGE is
+# the terse fallback and admins opted into long listings.
+MULTI_SEGMENT_BY_DESIGN = {"request_ack_late", "consent_prompt", "admin_guide",
+                           "ADMIN_USAGE"}
 
 RENDERED = {
     "consent_prompt": M.consent_prompt(ORG),
@@ -51,6 +54,8 @@ RENDERED = {
     "BAD_SUNDAYS": M.BAD_SUNDAYS,
     "BAD_YESNO": M.BAD_YESNO,
     "TOO_LATE": M.TOO_LATE,
+    "request_on_behalf": M.request_on_behalf(ORG, "Ada Administrator", "Kindergarten", SUNDAY),
+    "filled_requester": M.filled_requester(ORG, "Katherine Wetherington", "Tom Teacher", SUNDAY),
     "superseded": M.superseded(ORG),
     "PAUSED": M.PAUSED,
     "RESUMED": M.RESUMED,
@@ -139,6 +144,8 @@ BRANDED = {
     "superseded": M.superseded(ORG),
     "unfilled_teacher": M.unfilled_teacher(ORG, "3rd grade", SUNDAY),
     "admin_unfilled": M.admin_unfilled(ORG, "3rd grade", SUNDAY, "Tom"),
+    "request_on_behalf": M.request_on_behalf(ORG, "Ada", "3rd grade", SUNDAY),
+    "filled_requester": M.filled_requester(ORG, "Sam", "Tom", SUNDAY),
     "admin_digest": M.admin_digest(ORG, ["3rd grade (Tom)"]),
     "admin_last_call": M.admin_last_call(ORG, ["3rd grade (Tom)"]),
 }

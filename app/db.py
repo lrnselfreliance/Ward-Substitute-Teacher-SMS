@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -43,7 +43,25 @@ def make_engine(db_path: str) -> Engine:
 
     event.listen(engine, "connect", _apply_pragmas)
     Base.metadata.create_all(engine)
+    _add_missing_columns(engine)
     return engine
+
+
+# Columns added after the first release. create_all() only creates whole
+# tables, so a live database needs these bolted on. Order matters only if one
+# depends on another.
+ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("request", "requested_by_id", "INTEGER REFERENCES person(id)"),
+)
+
+
+def _add_missing_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table, column, ddl in ADDED_COLUMNS:
+            present = {c["name"] for c in inspector.get_columns(table)}
+            if column not in present:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
 
 
 def make_session_factory(engine: Engine) -> sessionmaker[Session]:
