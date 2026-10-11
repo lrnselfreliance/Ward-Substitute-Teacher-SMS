@@ -125,20 +125,76 @@ sending every batch twice. The `CMD` pins `--workers 1`; leave it.
 | Substitutes | `YES` `NO` `SUNDAYS 1 3`/`ALL` `MINE` |
 | Admins | `ADMIN HELP` `SUB <date> <teacher>` `OPEN` `SUNDAY <date>` `REQUEST <id>` `ROSTER` `FILL` `MOVE` `BROADCAST` |
 
-`ADMIN HELP` is a plain-English guide written for leaders who are not
-technical. `ADMIN SUB` files a request on a teacher's behalf; the teacher can
-be named by first name, last name, class, last four digits of their phone, or
-the `#number` shown in `ADMIN ROSTER`. When a fragment matches more than one
-person the reply lists them with numbers. The teacher is told who asked, and
-the admin is told when it fills.
+### Leader guide
 
-Two admin commands keep the data honest and are easy to forget:
+This is the same material `ADMIN HELP` returns by text, with room to breathe.
+Hand it to whoever will be running the service.
 
-- **`ADMIN FILL <date> <name>`** — record a swap arranged in the hallway. If
-  those never reach the database, the fairness ordering slowly becomes fiction.
-- **`ADMIN MOVE <old> <new>`** — `person` is keyed on phone number. Without
-  this, someone who changes numbers re-enrolls as a stranger and silently loses
-  their entire served history.
+**Becoming an admin.** There is no text command for it, on purpose: admins
+can see every phone number and text the whole group. Enroll by text first,
+then on the server:
+
+```bash
+docker compose exec substitute python -m cli.subctl admin +18015551234
+# add --remove to revoke
+```
+
+Admin is independent of role. An admin can also be a teacher, a substitute,
+both, or neither.
+
+**Every admin command starts with `ADMIN`.** Dates are month/day, e.g.
+`10/18`, and must be a Sunday; the reply suggests the nearest one if not.
+
+| Text | What it does |
+|---|---|
+| `ADMIN HELP` | The plain-English guide |
+| `ADMIN SUB 10/18 nursery` | Find a sub for a teacher. Name them by **first name, last name, class, last 4 digits of their phone, or `#number`** from the roster. Anything after the name is a note the subs will see: `ADMIN SUB 10/18 jayn out of town` |
+| `ADMIN OPEN` | Every request still waiting for a sub, soonest first |
+| `ADMIN SUNDAY 10/18` | All requests for that Sunday and how each stands |
+| `ADMIN REQUEST 12` | Who was asked about request #12, when, and what they said |
+| `ADMIN ROSTER` | Everyone signed up: `#number`, role flags, class, phone |
+| `ADMIN FILL 10/18 sam` | Record a sub you arranged in person, so the rotation stays fair |
+| `ADMIN MOVE <old> <new>` | Someone changed phone numbers; keeps their history |
+| `ADMIN BROADCAST <msg>` | Text everyone who is active. 8am–9pm only |
+
+**When a name matches more than one person**, the reply lists the candidates
+with their numbers, and you resend with the number:
+
+```
+More than one match:
+#2 JaynAnn Thomas (Nursery)
+#5 Jenny Thomas (CTR 6b)
+Reply with the number, e.g. ADMIN SUB 10/18 #5
+```
+
+Whole words and whole class names win over partial matches, so `6a` finds
+CTR 6a without also catching CTR 6b, while `ctr` lists both.
+
+**What happens after `ADMIN SUB`.** The teacher is texted that you asked on
+their behalf. You get a "Got it" naming the class and teacher. Subs are then
+asked exactly as if the teacher had texted `SUB` themselves. When someone
+accepts, the teacher gets the sub's name and number, and you get a one-line
+"will sub for" note. If nobody is left to ask, both of you are told.
+
+**What you are texted without asking.** A request that cannot be filled.
+On Saturdays, a 5pm digest of anything still open for tomorrow and an 8pm
+last call. A reply from a sub the system could not understand.
+
+**Things the service will refuse, and why.**
+
+- `ADMIN SUB` for someone who texted `STOP` or `PAUSE`. They asked not to be
+  texted, and an admin cannot consent on their behalf. They can text `RESUME`
+  or `START` themselves.
+- `ADMIN BROADCAST` between 9pm and 8am. Nothing proactive is sent then.
+- A request for a date that is not a Sunday, or is in the past.
+
+**Two commands that keep the data honest and are easy to forget:**
+
+- **`ADMIN FILL`** — people arrange swaps in the hallway. If those never reach
+  the database, the fairness ordering slowly becomes fiction.
+- **`ADMIN MOVE`** — people are keyed on phone number. Without this, someone
+  who changes numbers re-enrolls as a stranger and silently loses their served
+  history.
 
 ## How it behaves
 
