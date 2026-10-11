@@ -123,7 +123,7 @@ sending every batch twice. The `CMD` pins `--workers 1`; leave it.
 | Everyone | `HELP` `STATUS` `PAUSE` `RESUME` `STOP` |
 | Teachers | `SUB <date> [note]` `CANCEL <date>` `WHO` `CLASS <name>` |
 | Substitutes | `YES` `NO` `SUNDAYS 1 3`/`ALL` `MINE` |
-| Admins | `ADMIN HELP` `SUB <date> <teacher>` `OPEN` `SUNDAY <date>` `REQUEST <id>` `ROSTER` `FILL` `MOVE` `BROADCAST` |
+| Admins | `ADMIN HELP` `SUB <date> <teacher>` `CANCEL <date> <teacher>` `OPEN` `SUNDAY <date>` `REQUEST <id>` `ROSTER` `FILL` `MOVE` `BROADCAST` `BAN` `UNBAN` `HALT` `UNHALT` |
 
 ### Leader guide
 
@@ -156,6 +156,9 @@ both, or neither.
 | `ADMIN FILL 10/18 sam` | Record a sub you arranged in person, so the rotation stays fair |
 | `ADMIN MOVE <old> <new>` | Someone changed phone numbers; keeps their history |
 | `ADMIN BROADCAST <msg>` | Text everyone who is active. 8am–9pm only |
+| `ADMIN CANCEL 10/18 nursery` | Withdraw a teacher's request; the teacher and anyone asked are told |
+| `ADMIN HALT [reason]` / `ADMIN UNHALT` | Emergency stop for the whole service. See below |
+| `ADMIN BAN <who> [reason]` / `ADMIN UNBAN <who>` | Ignore one person completely. See below |
 
 **When a name matches more than one person**, the reply lists the candidates
 with their numbers, and you resend with the number:
@@ -187,6 +190,26 @@ last call. A reply from a sub the system could not understand.
   or `START` themselves.
 - `ADMIN BROADCAST` between 9pm and 8am. Nothing proactive is sent then.
 - A request for a date that is not a Sunday, or is in the past.
+
+**If something goes wrong.** Two switches exist for the day a bug or a
+person misbehaves and you are nowhere near a computer:
+
+- **`ADMIN HALT [reason]`** stops the whole service. Nothing is sent to
+  anyone until `ADMIN UNHALT`, enforced at the sending layer so it holds
+  even if the fault is upstream. The fill loop pauses. Admins can still use
+  `OPEN`, `SUNDAY`, `REQUEST`, `ROSTER`, `CANCEL`, `BAN` and `UNBAN`;
+  anything that would start new texting is refused. Texts from members
+  during a halt are dropped, and `UNHALT` tells you who went unanswered so
+  you can follow up. The switch is stored in the database, so a restart
+  does not undo it. `STOP` is still confirmed while halted.
+- **`ADMIN BAN <who> [reason]`** makes the service ignore one person
+  entirely: no replies, no offers, pending offers released, open requests
+  withdrawn. Give a full phone number for someone who never enrolled. Only
+  `STOP` still gets its confirmation. Admins cannot be banned by text; revoke
+  admin at the server first. `ADMIN UNBAN <who>` restores them as they were.
+
+Both notify every other admin. The same switches exist at the server as
+`subctl halt`, `unhalt`, `ban`, and `status`.
 
 **Two commands that keep the data honest and are easy to forget:**
 

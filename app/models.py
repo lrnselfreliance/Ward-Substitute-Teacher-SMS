@@ -98,6 +98,14 @@ class Person(Base):
     # Set when an unparseable reply needs a human to look at it.
     needs_attention: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # ADMIN BAN. Separate from `active` so UNBAN restores whatever state they
+    # were in. A banned person gets no replies and no offers; only STOP is
+    # still acknowledged.
+    banned: Mapped[bool] = mapped_column(Boolean, default=False)
+    banned_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    banned_by_id: Mapped[int | None] = mapped_column(ForeignKey("person.id"))
+    ban_reason: Mapped[str | None] = mapped_column(Text)
+
     @property
     def enrolled(self) -> bool:
         return self.enroll_state == DONE
@@ -162,6 +170,31 @@ class ProcessedMessage(Base):
     __tablename__ = "processed_message"
 
     sid: Mapped[str] = mapped_column(String(64), primary_key=True)
+    received_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class Setting(Base):
+    """Small key/value store for service-wide state, e.g. the HALT switch.
+
+    Lives in the database so a container restart cannot silently undo it.
+    """
+
+    __tablename__ = "setting"
+
+    key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    value: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class DroppedMessage(Base):
+    """Inbound texts that arrived while halted and were deliberately not
+    answered. Summarised to the admin on UNHALT, then cleared."""
+
+    __tablename__ = "dropped_message"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    phone: Mapped[str] = mapped_column(String(20))
+    body: Mapped[str | None] = mapped_column(Text)
     received_at: Mapped[datetime] = mapped_column(UTCDateTime)
 
 

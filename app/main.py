@@ -24,7 +24,8 @@ from .config import Config
 from .conversation import Router
 from .db import make_engine, make_session_factory
 from .fill import Filler
-from .gateway import FakeGateway, TwilioGateway
+from .gateway import FakeGateway, GuardedGateway, TwilioGateway
+from .halt import is_halted
 from .poller import FakeInbox, Poller, TwilioInbox
 
 logging.basicConfig(
@@ -47,6 +48,10 @@ def build(config: Config):
         log.warning("Twilio not configured -- using FakeGateway, nothing will send")
         gateway = FakeGateway(clock=clock)
 
+    # The HALT switch is enforced here, below everything that decides what
+    # to send, so it holds even when the bug being stopped is upstream.
+    gateway = GuardedGateway(gateway, session_factory)
+
     filler = Filler(session_factory, gateway, clock, config)
     router = Router(session_factory, gateway, clock, config, filler)
 
@@ -68,6 +73,7 @@ def build(config: Config):
             clock,
             lookback=timedelta(seconds=max(600, config.poll_seconds * 10)),
             heartbeat_url=config.heartbeat_url,
+            halted=lambda: is_halted(session_factory),
         )
         if config.heartbeat_url:
             log.info("heartbeat enabled")

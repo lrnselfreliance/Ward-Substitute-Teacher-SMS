@@ -243,6 +243,45 @@ UNKNOWN = "Sorry, I didn't understand. Text HELP for what I can do."
 QUIET_BROADCAST = "Broadcasts only go out 8am-9pm. Try again in the morning."
 
 
+# -- safety switches -------------------------------------------------------
+
+HALTED_CONFIRM = (
+    "HALTED. No texts will go out to anyone until ADMIN UNHALT. "
+    "ADMIN OPEN, ROSTER, CANCEL and BAN still work."
+)
+HALTED_REPLY = "Service is halted - nothing is being sent. ADMIN UNHALT to resume."
+ADMIN_HALTED_BLOCK = (
+    "Blocked while halted: that would start texting people. ADMIN UNHALT first."
+)
+
+
+def halt_status(by: str, reason: str | None) -> str:
+    why = f" ({reason})" if reason else ""
+    return f"SERVICE HALTED by {by}{why}. ADMIN UNHALT to resume."
+
+
+def halted_notice(org: str, admin: str, reason: str | None) -> str:
+    why = f": {reason}" if reason else ""
+    return f"{org}: {admin} HALTED the service{why}. Nothing will be sent until ADMIN UNHALT."
+
+
+def unhalted_notice(org: str, admin: str) -> str:
+    return f"{org}: {admin} resumed the service. Texting is back on."
+
+
+def banned_notice(org: str, admin: str, who: str, reason: str | None) -> str:
+    why = f": {reason}" if reason else ""
+    return f"{org}: {admin} banned {who}{why}. ADMIN UNBAN to reverse."
+
+
+def unbanned_notice(org: str, admin: str, who: str) -> str:
+    return f"{org}: {admin} unbanned {who}."
+
+
+def cancelled_on_behalf(org: str, admin: str, d: date) -> str:
+    return f"{org}: {admin} cancelled your sub request for {pretty_date(d)}."
+
+
 # -- help ------------------------------------------------------------------
 
 HELP_COMMON = ["HELP - this list", "STATUS - where things stand"]
@@ -261,12 +300,14 @@ HELP_SUB = [
 HELP_ADMIN = [
     "ADMIN SUB <date> <teacher> - request for a teacher",
     "ADMIN OPEN - what still needs a sub",
+    "ADMIN HALT - emergency stop all texting",
     "ADMIN HELP - full guide for leaders",
 ]
 
 ADMIN_USAGE = (
-    "ADMIN SUB <date> <teacher> | OPEN | SUNDAY <date> | REQUEST <id> | "
-    "ROSTER | FILL <date> <name> | MOVE <old> <new> | BROADCAST <msg>. "
+    "ADMIN SUB <date> <teacher> | CANCEL <date> <teacher> | OPEN | SUNDAY <date> | "
+    "REQUEST <id> | ROSTER | FILL <date> <name> | MOVE <old> <new> | "
+    "BROADCAST <msg> | BAN <who> | UNBAN <who> | HALT | UNHALT. "
     "Text ADMIN HELP for a plain-English guide."
 )
 
@@ -288,6 +329,14 @@ def admin_guide(org: str) -> str:
             "rotation stays fair",
             "ADMIN MOVE <old phone> <new phone> - someone got a new number",
             "ADMIN BROADCAST <message> - text everyone (8am-9pm only)",
+            "ADMIN CANCEL 10/18 nursery - withdraw a teacher's request",
+            "",
+            "If something goes wrong:",
+            "ADMIN HALT - emergency stop. Nothing is sent to anyone until "
+            "ADMIN UNHALT. You can still use OPEN, ROSTER, CANCEL and BAN.",
+            "ADMIN BAN jayn being rude - the service ignores that person "
+            "completely until ADMIN UNBAN. Use a full phone number for "
+            "someone who never signed up. Admins can't be banned by text.",
             "",
             "Subs are asked a few at a time, longest-since-served first, with "
             "more asked as Sunday gets closer. Nothing is sent 9pm-8am. You are "

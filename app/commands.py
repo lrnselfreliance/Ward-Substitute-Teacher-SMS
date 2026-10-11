@@ -11,14 +11,15 @@ from sqlalchemy.orm import Session
 
 from . import messages as M
 from .clock import to_local
+from .halt import clear_halt, halted, set_halt
 from .models import (
-    CANCELLED,
     DONE,
     FILLED,
     OPEN,
     PENDING,
     SUPERSEDED,
     UNFILLED,
+    DroppedMessage,
     Offer,
     Person,
     Request,
@@ -200,16 +201,7 @@ def cmd_cancel(ctx: Ctx) -> str:
     if not request:
         return M.NO_SUCH_REQUEST
 
-    request.status = CANCELLED
-    for offer in request.offers:
-        if offer.status == PENDING:
-            offer.status = SUPERSEDED
-            ctx.gateway.send(offer.person.phone, M.superseded(ctx.config.org_name))
-    if request.filled_by:
-        ctx.gateway.send(
-            request.filled_by.phone, M.superseded(ctx.config.org_name)
-        )
-    ctx.session.flush()
+    ctx.filler.cancel(ctx.session, request)
     return M.cancelled(service_date)
 
 
@@ -297,6 +289,10 @@ def cmd_status(ctx: Ctx) -> str:
         parts.append(cmd_mine(ctx))
     if not ctx.person.active:
         parts.append("You're paused. Text RESUME to start being asked again.")
+    if ctx.person.is_admin:
+        state = halted(ctx.session)
+        if state:
+            parts.append(M.halt_status(state.by, state.reason))
     return "\n".join(parts) or "Nothing going on right now."
 
 
@@ -342,7 +338,11 @@ def cmd_admin(ctx: Ctx) -> str:
     )
     handler = ADMIN_COMMANDS.get(sub)
     if not handler:
-        return M.ADMIN_USAGE
+        state = halted(ctx.session)
+        banner = M.halt_status(state.by, state.reason) + "\n" if state else ""
+        return banner + M.ADMIN_USAGE
+    if halted(ctx.session) and sub not in HALT_SAFE_ADMIN:
+        return M.ADMIN_HALTED_BLOCK
     return handler(inner)
 
 
@@ -387,7 +387,13 @@ def admin_sub(ctx: Ctx) -> str:
     return _file_request(ctx, teacher, service_date, note.strip() or None, on_behalf=True)
 
 
-def find_people(session: Session, fragment: str, *, teachers_only: bool = False) -> list[Person]:
+def find_people(
+    session: Session,
+    fragment: str,
+    *,
+    teachers_only: bool = False,
+    include_banned: bool = False,
+) -> list[Person]:
     """Enrolled people matching a short fragment an admin can actually type.
 
     Accepts a roster number (#12 or 12), the last four digits of a phone, or
@@ -403,6 +409,8 @@ def find_people(session: Session, fragment: str, *, teachers_only: bool = False)
     query = select(Person).where(Person.enroll_state == DONE)
     if teachers_only:
         query = query.where(Person.is_teacher.is_(True))
+    if not include_banned:
+        query = query.where(Person.banned.is_(False))
     people = session.scalars(query.order_by(Person.name)).all()
 
     if frag.isdigit() and len(frag) <= 3:
@@ -566,7 +574,188 @@ def admin_broadcast(ctx: Ctx) -> str:
     return f"Sent to {len(people) - 1} people."
 
 
+def _refresh_guard(ctx: Ctx) -> None:
+    refresh = getattr(ctx.gateway, "refresh", None)
+    if refresh:
+        refresh(ctx.session)
+
+
+def _other_admins(ctx: Ctx, body: str) -> None:
+    """Keep every admin in the loop on actions that affect the whole service."""
+    for admin in ctx.filler.admins(ctx.session):
+        if admin.id != ctx.person.id:
+            ctx.gateway.send(admin.phone, body)
+
+
+def admin_cancel(ctx: Ctx) -> str:
+    """ADMIN CANCEL <date> <teacher> -- withdraw someone else's request."""
+    service_date, rest, error = _resolve_service_date(ctx)
+    if error:
+        return "Which Sunday, and whose? e.g. ADMIN CANCEL 10/18 nursery"
+    who, _, _ = (rest or "").partition(" ")
+    if not who:
+        return "Whose request? e.g. ADMIN CANCEL 10/18 nursery"
+    matches = find_people(ctx.session, who, teachers_only=True, include_banned=True)
+    if not matches:
+        return f"No teacher matching '{who}'."
+    if len(matches) > 1:
+        return "More than one match:\n" + "\n".join(_describe_person(p) for p in matches)
+    teacher = matches[0]
+    request = ctx.session.scalar(
+        select(Request).where(
+            Request.teacher_id == teacher.id,
+            Request.service_date == service_date,
+            Request.status.in_([OPEN, FILLED]),
+        )
+    )
+    if not request:
+        return f"No open request for {teacher.name} on {M.pretty_date(service_date)}."
+    told = ctx.filler.cancel(ctx.session, request)
+    if teacher.id != ctx.person.id and teacher.active and not teacher.banned:
+        ctx.gateway.send(
+            teacher.phone,
+            M.cancelled_on_behalf(ctx.config.org_name, ctx.person.name, service_date),
+        )
+    note = ""
+    if told and halted(ctx.session):
+        note = f" {told} people had been asked and were NOT notified (halted)."
+    return f"Cancelled {teacher.name}'s request for {M.pretty_date(service_date)}.{note}"
+
+
+def admin_ban(ctx: Ctx) -> str:
+    """ADMIN BAN <who> [reason] -- stop all interaction with one person."""
+    who, _, reason = ctx.arg.strip().partition(" ")
+    reason = reason.strip() or None
+    if not who:
+        return "ADMIN BAN <name, class, last 4 digits, #number, or full phone> [reason]"
+
+    phone = normalize_phone(who) if len(re.sub(r"\D", "", who)) >= 10 else None
+    if phone:
+        person = ctx.session.scalar(select(Person).where(Person.phone == phone))
+        if person is None:
+            # Never enrolled (or never texted). A stub row means even their
+            # first text is ignored instead of starting onboarding.
+            person = Person(
+                phone=phone,
+                enroll_state="ask_consent",
+                created_at=ctx.clock.now(),
+                active=False,
+                sundays=0,
+            )
+            ctx.session.add(person)
+            ctx.session.flush()
+    else:
+        matches = find_people(ctx.session, who, include_banned=True)
+        if not matches:
+            return f"Nobody matching '{who}'. For someone not enrolled, give the full phone number."
+        if len(matches) > 1:
+            return "More than one match:\n" + "\n".join(_describe_person(p) for p in matches)
+        person = matches[0]
+
+    if person.is_admin:
+        return "Admins can't be banned by text. Remove their admin role at the server first."
+    if person.banned:
+        return f"{person.name or person.phone} is already banned."
+
+    person.banned = True
+    person.banned_at = ctx.clock.now()
+    person.banned_by_id = ctx.person.id
+    person.ban_reason = reason
+    ctx.filler.withdraw(ctx.session, person)
+    label = person.name or person.phone
+    _other_admins(
+        ctx, M.banned_notice(ctx.config.org_name, ctx.person.name, label, reason)
+    )
+    return (
+        f"Banned {label}. They get no replies and no requests until ADMIN UNBAN. "
+        "Other admins have been told."
+    )
+
+
+def admin_unban(ctx: Ctx) -> str:
+    who = ctx.arg.strip()
+    if not who:
+        return "ADMIN UNBAN <who>"
+    phone = normalize_phone(who) if len(re.sub(r"\D", "", who)) >= 10 else None
+    if phone:
+        matches = [p for p in [ctx.session.scalar(select(Person).where(Person.phone == phone))] if p]
+    else:
+        matches = [p for p in find_people(ctx.session, who, include_banned=True) if p.banned]
+    if not matches:
+        return f"Nobody banned matching '{who}'."
+    if len(matches) > 1:
+        return "More than one match:\n" + "\n".join(_describe_person(p) for p in matches)
+    person = matches[0]
+    if not person.banned:
+        return f"{person.name or person.phone} isn't banned."
+    person.banned = False
+    person.banned_at = None
+    person.banned_by_id = None
+    person.ban_reason = None
+    ctx.session.flush()
+    label = person.name or person.phone
+    _other_admins(ctx, M.unbanned_notice(ctx.config.org_name, ctx.person.name, label))
+    return f"Unbanned {label}."
+
+
+def admin_halt(ctx: Ctx) -> str:
+    """ADMIN HALT [reason] -- emergency stop for the whole service."""
+    state = halted(ctx.session)
+    if state:
+        return "Already halted. " + M.halt_status(state.by, state.reason)
+    reason = ctx.arg.strip() or None
+    set_halt(ctx.session, ctx.person.name, reason, ctx.clock.now())
+    _refresh_guard(ctx)
+    _other_admins(ctx, M.halted_notice(ctx.config.org_name, ctx.person.name, reason))
+    return M.HALTED_CONFIRM
+
+
+def admin_unhalt(ctx: Ctx) -> str:
+    if not halted(ctx.session):
+        return "The service isn't halted."
+    dropped = ctx.session.scalars(
+        select(DroppedMessage).order_by(DroppedMessage.received_at)
+    ).all()
+    summary = _summarise_dropped(ctx.session, dropped)
+    for row in dropped:
+        ctx.session.delete(row)
+    clear_halt(ctx.session, ctx.clock.now())
+    _refresh_guard(ctx)
+    _other_admins(ctx, M.unhalted_notice(ctx.config.org_name, ctx.person.name))
+    return "Service resumed. Texting is back on." + summary
+
+
+def _summarise_dropped(session: Session, dropped: list[DroppedMessage]) -> str:
+    if not dropped:
+        return " Nobody texted while halted."
+    by_phone: dict[str, int] = {}
+    for row in dropped:
+        by_phone[row.phone] = by_phone.get(row.phone, 0) + 1
+    names = []
+    for phone, count in by_phone.items():
+        person = session.scalar(select(Person).where(Person.phone == phone))
+        label = (person.name if person and person.name else phone)
+        names.append(f"{label} x{count}" if count > 1 else label)
+    return (
+        f" {len(dropped)} text(s) arrived while halted and were NOT answered: "
+        + ", ".join(names)
+        + ". You may want to follow up."
+    )
+
+
+# Admin subcommands that remain usable while halted: inspection and the
+# switch itself. Anything that would start new texting is blocked.
+HALT_SAFE_ADMIN = {
+    "HELP", "OPEN", "SUNDAY", "REQUEST", "ROSTER",
+    "HALT", "UNHALT", "BAN", "UNBAN", "CANCEL",
+}
+
 ADMIN_COMMANDS = {
+    "CANCEL": admin_cancel,
+    "BAN": admin_ban,
+    "UNBAN": admin_unban,
+    "HALT": admin_halt,
+    "UNHALT": admin_unhalt,
     "HELP": admin_help,
     "SUB": admin_sub,
     "OPEN": admin_open,

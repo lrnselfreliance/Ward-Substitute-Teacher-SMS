@@ -265,10 +265,25 @@ def test_old_database_gains_the_new_column(tmp_path):
             "service_date DATE, class_name VARCHAR(80), note TEXT, status VARCHAR(12), "
             "filled_by_id INTEGER, filled_at DATETIME, created_at DATETIME)"
         )
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE person (id INTEGER PRIMARY KEY, phone VARCHAR(20), "
+            "name VARCHAR(80), gender VARCHAR(1), is_teacher BOOLEAN, is_substitute BOOLEAN, "
+            "is_admin BOOLEAN, class_name VARCHAR(80), sundays INTEGER, active BOOLEAN, "
+            "enroll_state VARCHAR(20), consent_at DATETIME, consent_text TEXT, "
+            "created_at DATETIME, needs_attention BOOLEAN)"
+        )
+        conn.execute("INSERT INTO person (id, phone, active, enroll_state, sundays, is_admin, is_teacher, is_substitute, needs_attention) "
+                     "VALUES (1, '+15550000001', 1, 'done', 31, 0, 0, 1, 0)")
     make_engine(str(path))
     with sqlite3.connect(path) as conn:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(request)")}
+        # Existing rows must read back as not banned, not NULL.
+        assert conn.execute("SELECT banned FROM person WHERE id=1").fetchone()[0] == 0
     assert "requested_by_id" in cols
+    with sqlite3.connect(path) as conn:
+        pcols = {row[1] for row in conn.execute("PRAGMA table_info(person)")}
+    assert {"banned", "banned_at", "banned_by_id", "ban_reason"} <= pcols
 
 
 # -- opt-outs are honoured on every new path -----------------------------------

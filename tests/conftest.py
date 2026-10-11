@@ -10,7 +10,7 @@ from app.config import Config
 from app.conversation import Router
 from app.db import make_engine, make_session_factory
 from app.fill import Filler
-from app.gateway import FakeGateway
+from app.gateway import FakeGateway, GuardedGateway
 from app.models import DONE, MALE, Person
 
 TZ = ZoneInfo("America/Denver")
@@ -24,7 +24,8 @@ class App:
         engine = make_engine(":memory:")
         self.session_factory = make_session_factory(engine)
         self.clock = FrozenClock(datetime(2026, 3, 2, 15, 0, tzinfo=TZ))
-        self.gateway = FakeGateway(clock=self.clock)
+        # Same wrapping as production, so HALT is exercised at the real layer.
+        self.gateway = GuardedGateway(FakeGateway(clock=self.clock), self.session_factory)
         self.filler = Filler(
             self.session_factory, self.gateway, self.clock, self.config
         )

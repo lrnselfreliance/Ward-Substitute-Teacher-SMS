@@ -18,7 +18,8 @@ from app.config import Config
 from app.conversation import Router
 from app.db import make_engine, make_session_factory
 from app.fill import Filler
-from app.gateway import FakeGateway
+from app.gateway import FakeGateway, GuardedGateway
+from app.halt import clear_halt, halted, set_halt
 from app.messages import describe
 from app.models import DONE, Person, Request
 from app.ranking import eligible
@@ -28,7 +29,7 @@ def _wire(config: Config):
     engine = make_engine(config.db_path)
     session_factory = make_session_factory(engine)
     clock = SystemClock()
-    gateway = FakeGateway(clock=clock)
+    gateway = GuardedGateway(FakeGateway(clock=clock), session_factory)
     filler = Filler(session_factory, gateway, clock, config)
     router = Router(session_factory, gateway, clock, config, filler)
     return session_factory, gateway, clock, filler, router
@@ -103,6 +104,50 @@ def cmd_admin(args, config):
         print(f"{person.name}: admin={person.is_admin}")
 
 
+def cmd_halt(args, config):
+    session_factory, *_ = _wire(config)
+    with session_factory() as session:
+        set_halt(session, "server", " ".join(args.reason) or None, SystemClock().now())
+        session.commit()
+        print("HALTED. Nothing will be sent until `subctl unhalt` or ADMIN UNHALT.")
+
+
+def cmd_unhalt(args, config):
+    session_factory, *_ = _wire(config)
+    with session_factory() as session:
+        clear_halt(session, SystemClock().now())
+        session.commit()
+        print("resumed")
+
+
+def cmd_status(args, config):
+    session_factory, *_ = _wire(config)
+    with session_factory() as session:
+        state = halted(session)
+        print(f"halted by {state.by}: {state.reason or '-'} (since {state.at})"
+              if state else "running")
+        banned = session.scalars(select(Person).where(Person.banned.is_(True))).all()
+        for p in banned:
+            print(f"banned: {p.phone} {p.name or '?'} ({p.ban_reason or '-'})")
+
+
+def cmd_ban(args, config):
+    session_factory, *_ = _wire(config)
+    phone = normalize_phone(args.phone)
+    with session_factory() as session:
+        person = session.scalar(select(Person).where(Person.phone == phone))
+        if person is None:
+            person = Person(phone=phone, enroll_state="ask_consent", active=False,
+                            sundays=0, created_at=SystemClock().now())
+            session.add(person)
+        person.banned = not args.remove
+        person.banned_at = None if args.remove else SystemClock().now()
+        person.ban_reason = None if args.remove else (" ".join(args.reason) or None)
+        person.banned_by_id = None
+        session.commit()
+        print(f"{person.name or phone}: banned={person.banned}")
+
+
 def cmd_simulate(args, config):
     """Send a message as if it arrived from a phone, and print the replies."""
     session_factory, gateway, clock, filler, router = _wire(config)
@@ -129,6 +174,18 @@ def main(argv=None) -> None:
     sub.add_parser("people").set_defaults(func=cmd_people)
     sub.add_parser("requests").set_defaults(func=cmd_requests)
     sub.add_parser("tick").set_defaults(func=cmd_tick)
+    sub.add_parser("status", help="halt state and bans").set_defaults(func=cmd_status)
+    sub.add_parser("unhalt", help="lift an emergency stop").set_defaults(func=cmd_unhalt)
+
+    p = sub.add_parser("halt", help="emergency stop: send nothing to anyone")
+    p.add_argument("reason", nargs="*")
+    p.set_defaults(func=cmd_halt)
+
+    p = sub.add_parser("ban", help="ignore a phone number entirely")
+    p.add_argument("phone")
+    p.add_argument("reason", nargs="*")
+    p.add_argument("--remove", action="store_true", help="unban")
+    p.set_defaults(func=cmd_ban)
 
     p = sub.add_parser("offers")
     p.add_argument("request_id", type=int)

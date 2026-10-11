@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from . import messages as M
 from .commands import COMMANDS, Ctx
+from .halt import halted
 from .models import (
     ASK_CLASS,
     ASK_GENDER,
@@ -30,17 +31,15 @@ from .models import (
     ASK_NAME,
     ASK_ROLE,
     ASK_SUNDAYS,
-    CANCELLED,
     CONFIRM,
     DONE,
     EXPIRED,
-    OPEN,
     PENDING,
     SUPERSEDED,
+    DroppedMessage,
     Offer,
     Person,
     ProcessedMessage,
-    Request,
 )
 from .parsers import (
     clean_name,
@@ -67,6 +66,8 @@ HELP_WORDS = {"help", "info"}
 # unknown or inactive -- an enrolled member's "yes" must still answer the
 # offer they are holding.
 START_WORDS = {"start", "join", "unstop", "unstopall", "resubscribe", "yes"}
+# What an admin may still do while the service is halted.
+HALT_SAFE = {"ADMIN", "HELP", "STATUS"}
 
 
 class Router:
@@ -84,6 +85,7 @@ class Router:
             try:
                 if sid and self._already_seen(session, sid):
                     return
+                self._refresh_guard(session)
                 reply = self._route(session, phone, body or "")
                 if reply:
                     self.gateway.send(phone, reply)
@@ -92,6 +94,11 @@ class Router:
                 session.rollback()
                 log.exception("failed handling message from %s", phone)
                 self.gateway.send(phone, M.UNKNOWN)
+
+    def _refresh_guard(self, session: Session) -> None:
+        refresh = getattr(self.gateway, "refresh", None)
+        if refresh:
+            refresh(session)
 
     def _already_seen(self, session: Session, sid: str) -> bool:
         if session.get(ProcessedMessage, sid):
@@ -106,13 +113,27 @@ class Router:
         text = normalize(body)
         person = session.scalar(select(Person).where(Person.phone == phone))
 
-        # 1. compliance
+        # 0. banned: silence, except that STOP is still acknowledged.
+        if person and person.banned:
+            if text in STOP_WORDS:
+                person.active = False
+                self.gateway.send(phone, M.stopped(self.config.org_name), force=True)
+            else:
+                log.info("ignoring text from banned %s", phone)
+            return None
+
+        # 1. compliance. STOP bypasses the HALT guard: it is a one-line
+        # confirmation carriers require, and the sender is leaving anyway.
         if text in STOP_WORDS:
             if person:
                 person.active = False
-                self._release_pending(session, person)
-                self._cancel_open_requests(session, person)
-            return M.stopped(self.config.org_name)
+                self.filler.withdraw(session, person)
+            self.gateway.send(phone, M.stopped(self.config.org_name), force=True)
+            return None
+
+        # 1b. halted: only admins operating the switch get through.
+        if halted(session):
+            return self._while_halted(session, person, phone, body)
         if text in START_WORDS and (person is None or not person.active):
             return self._opt_in(session, person, phone, body)
         if text in HELP_WORDS:
@@ -133,19 +154,9 @@ class Router:
             return self._onboard(session, person, body)
 
         # 4. explicit command
-        head, arg = split_command(body)
-        handler = COMMANDS.get(head)
-        if handler:
-            ctx = Ctx(
-                session=session,
-                person=person,
-                arg=arg,
-                filler=self.filler,
-                gateway=self.gateway,
-                clock=self.clock,
-                config=self.config,
-            )
-            return handler(ctx)
+        head, _ = split_command(body)
+        if head in COMMANDS:
+            return self._command(session, person, body)
 
         # 5. answer to an outstanding offer
         offer = session.scalar(
@@ -220,30 +231,39 @@ class Router:
         session.flush()
         return person
 
-    def _release_pending(self, session: Session, person: Person) -> None:
-        offers = session.scalars(
-            select(Offer).where(Offer.person_id == person.id, Offer.status == PENDING)
-        ).all()
-        for offer in offers:
-            offer.status = "expired"
+    def _while_halted(
+        self, session: Session, person: Person | None, phone: str, body: str
+    ) -> str | None:
+        """Admins may inspect and operate the switch; everyone else is
+        dropped and counted so UNHALT can report who went unanswered."""
+        is_admin = bool(person and person.enrolled and person.is_admin)
+        head, _ = split_command(body)
+        if is_admin and head in HALT_SAFE:
+            return self._command(session, person, body)
+        if is_admin:
+            return M.HALTED_REPLY
+        session.add(
+            DroppedMessage(phone=phone, body=body, received_at=self.clock.now())
+        )
+        log.warning("HALTED: dropped text from %s", phone)
+        return None
 
-    def _cancel_open_requests(self, session: Session, person: Person) -> None:
-        """STOP promises no further messages, which an open request would
-        break the moment a substitute accepted. Withdraw it; the people
-        already asked are told to stand down."""
-        requests = session.scalars(
-            select(Request).where(
-                Request.teacher_id == person.id, Request.status == OPEN
+    def _command(self, session: Session, person: Person, body: str) -> str | None:
+        head, arg = split_command(body)
+        handler = COMMANDS.get(head)
+        if not handler:
+            return M.UNKNOWN
+        return handler(
+            Ctx(
+                session=session,
+                person=person,
+                arg=arg,
+                filler=self.filler,
+                gateway=self.gateway,
+                clock=self.clock,
+                config=self.config,
             )
-        ).all()
-        for request in requests:
-            request.status = CANCELLED
-            for offer in request.offers:
-                if offer.status == PENDING:
-                    offer.status = SUPERSEDED
-                    self.gateway.send(
-                        offer.person.phone, M.superseded(self.config.org_name)
-                    )
+        )
 
     def _answer_offer(self, session: Session, offer: Offer, body: str) -> str:
         answer = parse_yes_no(body)

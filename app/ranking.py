@@ -66,6 +66,7 @@ def eligible(session: Session, request: Request) -> list[Person]:
     people = session.scalars(
         select(Person).where(
             Person.active.is_(True),
+            Person.banned.is_(False),
             Person.is_substitute.is_(True),
             Person.enroll_state == "done",
             Person.gender == teacher.gender,

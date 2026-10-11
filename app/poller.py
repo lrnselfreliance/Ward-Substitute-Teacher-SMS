@@ -97,6 +97,7 @@ class Poller:
         clock,
         lookback: timedelta = timedelta(minutes=10),
         heartbeat_url: str | None = None,
+        halted=None,
     ) -> None:
         self.inbox = inbox
         self.router = router
@@ -104,6 +105,7 @@ class Poller:
         self.clock = clock
         self.lookback = lookback
         self.heartbeat_url = heartbeat_url
+        self.halted = halted  # callable -> bool; shows HALTED on the monitor
 
     def poll(self) -> int:
         """Fetch and dispatch new inbound messages. Returns how many ran."""
@@ -138,8 +140,11 @@ class Poller:
         """Tell the uptime monitor the poll loop is alive. Never raises."""
         if not self.heartbeat_url:
             return
+        url = self.heartbeat_url
+        if self.halted and self.halted():
+            url = url.replace("msg=OK", "msg=HALTED")
         try:
-            urllib.request.urlopen(self.heartbeat_url, timeout=5).close()
+            urllib.request.urlopen(url, timeout=5).close()
         except Exception as exc:  # monitoring must never break the thing monitored
             log.warning("heartbeat failed: %s", exc)
 

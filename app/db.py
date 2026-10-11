@@ -52,6 +52,10 @@ def make_engine(db_path: str) -> Engine:
 # depends on another.
 ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("request", "requested_by_id", "INTEGER REFERENCES person(id)"),
+    ("person", "banned", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("person", "banned_at", "DATETIME"),
+    ("person", "banned_by_id", "INTEGER REFERENCES person(id)"),
+    ("person", "ban_reason", "TEXT"),
 )
 
 

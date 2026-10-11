@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 from . import messages as M
 from .clock import Clock, to_local, to_utc
 from .config import Config, tier_for
+from .halt import halted
 from .models import (
+    CANCELLED,
     EXPIRED,
     FILLED,
     OPEN,
@@ -52,7 +54,9 @@ class Filler:
         return list(
             session.scalars(
                 select(Person).where(
-                    Person.is_admin.is_(True), Person.active.is_(True)
+                    Person.is_admin.is_(True),
+                    Person.active.is_(True),
+                    Person.banned.is_(False),
                 )
             ).all()
         )
@@ -60,6 +64,41 @@ class Filler:
     def notify_admins(self, session: Session, body: str) -> None:
         for admin in self.admins(session):
             self.gateway.send(admin.phone, body)
+
+    def withdraw(self, session: Session, person: Person) -> int:
+        """Pull someone out of everything in flight: their pending offers
+        expire and their open requests are cancelled, with the people already
+        asked told to stand down. Used by STOP and BAN. Returns how many of
+        those people were notified."""
+        told = 0
+        for offer in session.scalars(
+            select(Offer).where(Offer.person_id == person.id, Offer.status == PENDING)
+        ).all():
+            offer.status = EXPIRED
+        for request in session.scalars(
+            select(Request).where(
+                Request.teacher_id == person.id, Request.status == OPEN
+            )
+        ).all():
+            told += self.cancel(session, request)
+        session.flush()
+        return told
+
+    def cancel(self, session: Session, request: Request) -> int:
+        """Cancel a request; pending offerees and any accepted sub are told.
+        Returns how many people were notified."""
+        request.status = CANCELLED
+        told = 0
+        for offer in request.offers:
+            if offer.status == PENDING:
+                offer.status = SUPERSEDED
+                self.gateway.send(offer.person.phone, M.superseded(self.config.org_name))
+                told += 1
+        if request.filled_by:
+            self.gateway.send(request.filled_by.phone, M.superseded(self.config.org_name))
+            told += 1
+        session.flush()
+        return told
 
     def notify_requester(
         self, session: Session, request: Request, *, exclude: int | None = None
@@ -103,6 +142,8 @@ class Filler:
         if self.quiet.is_quiet(now):
             return 0
         if request.status != OPEN:
+            return 0
+        if halted(session):
             return 0
 
         days_until = (request.service_date - self.today()).days
@@ -228,6 +269,11 @@ class Filler:
     def tick(self) -> None:
         with self.session_factory() as session:
             try:
+                refresh = getattr(self.gateway, "refresh", None)
+                if refresh:
+                    refresh(session)
+                if halted(session):
+                    return
                 self._expire_offers(session)
                 self._advance_open_requests(session)
                 self._saturday_pushes(session)
