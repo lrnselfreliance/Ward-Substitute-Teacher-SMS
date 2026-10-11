@@ -52,12 +52,13 @@ MALE, FEMALE = "M", "F"
 
 OPEN, FILLED, CANCELLED, UNFILLED = "open", "filled", "cancelled", "unfilled"
 
-PENDING, ACCEPTED, DECLINED, EXPIRED, SUPERSEDED = (
+PENDING, ACCEPTED, DECLINED, EXPIRED, SUPERSEDED, FAILED = (
     "pending",
     "accepted",
     "declined",
     "expired",
     "superseded",
+    "failed",  # the carrier rejected the text; never counted as asked
 )
 
 # Onboarding states. Consent comes first -- nothing is collected before it.

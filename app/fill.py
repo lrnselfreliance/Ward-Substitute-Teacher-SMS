@@ -17,6 +17,7 @@ from .halt import halted
 from .models import (
     CANCELLED,
     EXPIRED,
+    FAILED,
     FILLED,
     OPEN,
     PENDING,
@@ -159,17 +160,9 @@ class Filler:
             return 0
 
         expires_at = self.quiet.add_waking(now, tier.ttl)
+        asked = 0
         for person in candidates:
-            session.add(
-                Offer(
-                    request_id=request.id,
-                    person_id=person.id,
-                    sent_at=now,
-                    expires_at=expires_at,
-                    status=PENDING,
-                )
-            )
-            self.gateway.send(
+            sent = self.gateway.send(
                 person.phone,
                 M.offer(
                     self.config.org_name,
@@ -179,8 +172,24 @@ class Filler:
                     request.note,
                 ),
             )
+            # Send first, record second. A text the carrier rejected must not
+            # count as "asked": a FAILED row keeps this request from retrying
+            # the same number every minute, but it is not pending, so the
+            # batch moves on, and they are eligible again for the next date.
+            session.add(
+                Offer(
+                    request_id=request.id,
+                    person_id=person.id,
+                    sent_at=now,
+                    expires_at=expires_at if sent else now,
+                    status=PENDING if sent else FAILED,
+                )
+            )
+            asked += int(sent)
         session.flush()
-        return len(candidates)
+        if asked == 0 and candidates:
+            log.error("no offer could be sent for request #%s", request.id)
+        return asked
 
     def _mark_unfilled(self, session: Session, request: Request) -> None:
         request.status = UNFILLED

@@ -132,10 +132,10 @@ class Poller:
         except Exception:
             log.exception("inbox fetch failed")
             return 0
-        self._mark_ok(now)
         self._heartbeat()
 
         if self._bootstrap(messages):
+            self._mark_ok(now)
             return 0
 
         handled = 0
@@ -144,6 +144,9 @@ class Poller:
                 continue
             self.router.handle(message.from_, message.body, message.sid)
             handled += 1
+        # Only now: if the process died mid-dispatch, the next poll must
+        # reach back to this fetch's window, not past it.
+        self._mark_ok(now)
         return handled
 
     def _heartbeat(self) -> None:

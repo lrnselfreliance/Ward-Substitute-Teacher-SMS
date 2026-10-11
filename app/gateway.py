@@ -16,7 +16,8 @@ log = logging.getLogger(__name__)
 
 
 class Gateway(Protocol):
-    def send(self, to: str, body: str, *, force: bool = False) -> None: ...
+    def send(self, to: str, body: str, *, force: bool = False) -> bool:
+        """True if the carrier accepted the message. Never raises."""
 
 
 @dataclass
@@ -30,11 +31,17 @@ class Sent:
 class FakeGateway:
     sent: list[Sent] = field(default_factory=list)
     clock: object | None = None
+    # Phones whose sends should fail, to exercise the failure paths.
+    failing: set[str] = field(default_factory=set)
 
-    def send(self, to: str, body: str, *, force: bool = False) -> None:
+    def send(self, to: str, body: str, *, force: bool = False) -> bool:
+        if to in self.failing:
+            log.warning("SMS -> %s FAILED (fake)", to)
+            return False
         at = self.clock.now() if self.clock else None
         self.sent.append(Sent(to=to, body=body, at=at))
-        log.info("SMS -> %s: %s", to, body)
+        log.debug("SMS -> %s: %s", to, body)
+        return True
 
     # -- test helpers -------------------------------------------------------
 
@@ -71,13 +78,16 @@ class TwilioGateway:
         self._client = twilio_client(account_sid, auth_token)
         self._from = from_number
 
-    def send(self, to: str, body: str, *, force: bool = False) -> None:
+    def send(self, to: str, body: str, *, force: bool = False) -> bool:
         try:
             self._client.messages.create(to=to, from_=self._from, body=body)
+            return True
         except Exception:
             # A single failed send must never take down the tick loop or leave
-            # a webhook unanswered; Twilio would then retry the inbound message.
+            # a webhook unanswered. Callers see False and decide what that
+            # means for them; an offer, for instance, is not recorded as asked.
             log.exception("failed sending SMS to %s", to)
+            return False
 
 
 class GuardedGateway:
@@ -128,12 +138,14 @@ class GuardedGateway:
     def halted(self) -> bool:
         return self._halted
 
-    def send(self, to: str, body: str, *, force: bool = False) -> None:
+    def send(self, to: str, body: str, *, force: bool = False) -> bool:
         if self._halted and not force and to not in self._admin_phones:
             log.warning("HALTED: dropped message to %s", to)
-            return
-        self._inner.send(to, body)
-        self._unrecorded.append((to, datetime.now(timezone.utc)))
+            return False
+        ok = self._inner.send(to, body)
+        if ok:
+            self._unrecorded.append((to, datetime.now(timezone.utc)))
+        return ok
 
     def drain(self, session, now: datetime) -> int:
         """Write buffered sends to SentMessage. Returns how many."""

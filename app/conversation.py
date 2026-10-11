@@ -81,10 +81,14 @@ class Router:
     # -- entry point --------------------------------------------------------
 
     def handle(self, phone: str, body: str, sid: str | None = None) -> None:
+        # The dedupe row is committed on its own, before any routing. If the
+        # handler then crashes, the message is logged and dropped rather than
+        # re-run on every poll -- re-running could repeat texts that were
+        # already handed to the carrier before the crash.
+        if sid and not self._claim(sid):
+            return
         with self.session_factory() as session:
             try:
-                if sid and self._already_seen(session, sid):
-                    return
                 self._refresh_guard(session)
                 reply = self._route(session, phone, body or "")
                 if reply:
@@ -93,19 +97,30 @@ class Router:
             except Exception:
                 session.rollback()
                 log.exception("failed handling message from %s", phone)
-                self.gateway.send(phone, M.UNKNOWN)
+                self._apologise(phone)
+
+    def _apologise(self, phone: str) -> None:
+        """Crash path: tell the sender something went wrong, unless they are
+        someone we deliberately never answer."""
+        with self.session_factory() as session:
+            person = session.scalar(select(Person).where(Person.phone == phone))
+            if person and person.banned:
+                return
+        self.gateway.send(phone, M.UNKNOWN)
 
     def _refresh_guard(self, session: Session) -> None:
         refresh = getattr(self.gateway, "refresh", None)
         if refresh:
             refresh(session)
 
-    def _already_seen(self, session: Session, sid: str) -> bool:
-        if session.get(ProcessedMessage, sid):
+    def _claim(self, sid: str) -> bool:
+        """Record the MessageSid in its own transaction. False if seen before."""
+        with self.session_factory() as session:
+            if session.get(ProcessedMessage, sid):
+                return False
+            session.add(ProcessedMessage(sid=sid, received_at=self.clock.now()))
+            session.commit()
             return True
-        session.add(ProcessedMessage(sid=sid, received_at=self.clock.now()))
-        session.flush()
-        return False
 
     # -- routing ------------------------------------------------------------
 
