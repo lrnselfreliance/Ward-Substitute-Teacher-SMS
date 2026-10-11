@@ -52,11 +52,23 @@ class FakeGateway:
         self.sent.clear()
 
 
+# Seconds to wait on any single Twilio API call. Without this a dead TCP
+# connection hangs until the OS gives up, stalling the poll loop for minutes.
+HTTP_TIMEOUT = 15
+
+
+def twilio_client(account_sid: str, auth_token: str):
+    from twilio.http.http_client import TwilioHttpClient
+    from twilio.rest import Client
+
+    return Client(
+        account_sid, auth_token, http_client=TwilioHttpClient(timeout=HTTP_TIMEOUT)
+    )
+
+
 class TwilioGateway:
     def __init__(self, account_sid: str, auth_token: str, from_number: str) -> None:
-        from twilio.rest import Client
-
-        self._client = Client(account_sid, auth_token)
+        self._client = twilio_client(account_sid, auth_token)
         self._from = from_number
 
     def send(self, to: str, body: str) -> None:

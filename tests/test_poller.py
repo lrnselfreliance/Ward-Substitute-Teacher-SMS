@@ -128,3 +128,30 @@ def test_webhook_mode_still_serves_the_endpoint():
         assert client.post(
             "/sms", data={"From": "+15551110001", "Body": "hi"}
         ).status_code == 204
+
+
+def test_outage_longer_than_lookback_loses_nothing(polled):
+    """A fixed window would skip texts sent early in a long outage."""
+    class Broken:
+        def fetch(self, since):
+            raise ConnectionError("network down")
+
+    real = polled.poller.inbox
+    sent_during_outage = polled.clock.now() + timedelta(minutes=2)
+    real.deliver(TEACHER, "SUB 3/15", sent_during_outage)
+
+    polled.poller.inbox = Broken()
+    for _ in range(3):
+        polled.advance(minutes=10)
+        assert polled.poller.poll() == 0  # 30 minutes down, lookback is 10
+
+    polled.poller.inbox = real
+    assert polled.poller.poll() == 1
+    assert "sub needed" in polled.last(TEACHER)
+
+
+def test_twilio_clients_carry_a_timeout():
+    from app.gateway import HTTP_TIMEOUT, twilio_client
+
+    client = twilio_client("ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "token")
+    assert client.http_client.timeout == HTTP_TIMEOUT

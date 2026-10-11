@@ -28,6 +28,9 @@ from .models import Notice, ProcessedMessage
 log = logging.getLogger(__name__)
 
 BOOTSTRAP = ("poll", "bootstrapped")
+# When the last fetch succeeded. Persisted so an outage that spans a restart
+# is still covered.
+LAST_OK = ("poll", "last_ok")
 
 
 @dataclass
@@ -44,9 +47,9 @@ class Inbox(Protocol):
 
 class TwilioInbox:
     def __init__(self, account_sid: str, auth_token: str, our_number: str) -> None:
-        from twilio.rest import Client
+        from .gateway import twilio_client
 
-        self._client = Client(account_sid, auth_token)
+        self._client = twilio_client(account_sid, auth_token)
         self._number = our_number
 
     def fetch(self, since: datetime) -> list[Inbound]:
@@ -101,12 +104,20 @@ class Poller:
 
     def poll(self) -> int:
         """Fetch and dispatch new inbound messages. Returns how many ran."""
-        since = self.clock.now() - self.lookback
+        now = self.clock.now()
+        since = now - self.lookback
+        # After an outage longer than the lookback, a fixed window would skip
+        # everything sent in its early minutes. Reach back to the last fetch
+        # that worked instead; the MessageSid dedupe absorbs the overlap.
+        last_ok = self._last_ok()
+        if last_ok is not None and last_ok < since:
+            since = last_ok
         try:
             messages = self.inbox.fetch(since)
         except Exception:
             log.exception("inbox fetch failed")
             return 0
+        self._mark_ok(now)
 
         if self._bootstrap(messages):
             return 0
@@ -118,6 +129,24 @@ class Poller:
             self.router.handle(message.from_, message.body, message.sid)
             handled += 1
         return handled
+
+    def _last_ok(self) -> datetime | None:
+        with self.session_factory() as session:
+            row = session.scalar(
+                select(Notice).where(Notice.kind == LAST_OK[0], Notice.key == LAST_OK[1])
+            )
+            return row.sent_at if row else None
+
+    def _mark_ok(self, at: datetime) -> None:
+        with self.session_factory() as session:
+            row = session.scalar(
+                select(Notice).where(Notice.kind == LAST_OK[0], Notice.key == LAST_OK[1])
+            )
+            if row:
+                row.sent_at = at
+            else:
+                session.add(Notice(kind=LAST_OK[0], key=LAST_OK[1], sent_at=at))
+            session.commit()
 
     def _seen(self, sid: str) -> bool:
         with self.session_factory() as session:
