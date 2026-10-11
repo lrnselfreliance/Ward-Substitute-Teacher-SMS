@@ -6,9 +6,13 @@ Everything tunable lives here so behaviour can change without code edits.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from datetime import time, timedelta
 from zoneinfo import ZoneInfo
+
+
+E164 = re.compile(r"\+[1-9]\d{7,14}")
 
 
 def _parse_time(value: str) -> time:
@@ -99,3 +103,21 @@ class Config:
     @property
     def polling(self) -> bool:
         return self.inbound_mode == "poll"
+
+    @property
+    def twilio_configured(self) -> bool:
+        return bool(self.twilio_account_sid and self.twilio_auth_token and self.twilio_from)
+
+    def validate(self) -> None:
+        """Refuse to start on settings that would fail silently.
+
+        A malformed TWILIO_FROM is the nasty one: in poll mode it becomes the
+        `To` filter on every inbox query, which then simply returns nothing
+        while every other sign of life stays green.
+        """
+        if self.twilio_from and not E164.fullmatch(self.twilio_from):
+            raise ValueError(
+                f"TWILIO_FROM must be E.164 like +18015551234, got {self.twilio_from!r}"
+            )
+        if self.poll_seconds < 5:
+            raise ValueError("POLL_SECONDS must be at least 5")

@@ -36,11 +36,12 @@ log = logging.getLogger(__name__)
 
 def build(config: Config):
     """Wire the object graph. Returns everything the routes and CLI need."""
+    config.validate()
     engine = make_engine(config.db_path)
     session_factory = make_session_factory(engine)
     clock = SystemClock()
 
-    if config.twilio_account_sid and config.twilio_auth_token and config.twilio_from:
+    if config.twilio_configured:
         gateway = TwilioGateway(
             config.twilio_account_sid, config.twilio_auth_token, config.twilio_from
         )
@@ -57,12 +58,15 @@ def build(config: Config):
 
     poller = None
     if config.polling:
-        if config.twilio_account_sid and config.twilio_auth_token and config.twilio_from:
+        if config.twilio_configured:
             inbox = TwilioInbox(
                 config.twilio_account_sid,
                 config.twilio_auth_token,
                 config.twilio_from,
             )
+            # The number must actually be on this account, or every poll
+            # returns an empty list forever. Better to refuse to start.
+            inbox.assert_number_owned()
         else:
             log.warning("polling requested but Twilio not configured -- using FakeInbox")
             inbox = FakeInbox()

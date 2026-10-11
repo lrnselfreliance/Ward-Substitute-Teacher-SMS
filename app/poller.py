@@ -53,6 +53,16 @@ class TwilioInbox:
         self._client = twilio_client(account_sid, auth_token)
         self._number = our_number
 
+    def assert_number_owned(self) -> None:
+        """Raise unless TWILIO_FROM is a number on this Twilio account."""
+        owned = self._client.incoming_phone_numbers.list(phone_number=self._number)
+        if not owned:
+            raise RuntimeError(
+                f"TWILIO_FROM {self._number} is not a number on this Twilio account; "
+                "polling would silently see nothing"
+            )
+        log.info("polling inbox for %s", self._number)
+
     def fetch(self, since: datetime) -> list[Inbound]:
         messages = self._client.messages.list(to=self._number, date_sent_after=since)
         found = []

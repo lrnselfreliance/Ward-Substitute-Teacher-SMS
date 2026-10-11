@@ -191,3 +191,33 @@ def test_heartbeat_failure_does_not_break_polling(polled, monkeypatch):
     polled.poller.heartbeat_url = "http://kuma/api/push/abc"
     polled.inbox.deliver(TEACHER, "SUB 3/15", polled.clock.now())
     assert polled.poller.poll() == 1
+
+
+def test_malformed_twilio_from_refuses_to_start():
+    """A bad number would make every poll return nothing, silently."""
+    import pytest
+
+    for bad in ("/resu", "3853547328", "+1 385 354 7328", "+1385354732x"):
+        with pytest.raises(ValueError):
+            Config(db_path=":memory:", timezone=TZ, twilio_from=bad).validate()
+    Config(db_path=":memory:", timezone=TZ, twilio_from="+13853547328").validate()
+
+
+def test_poll_mode_checks_the_number_is_on_the_account(monkeypatch):
+    import pytest
+
+    import app.main as main_mod
+
+    class _Numbers:
+        def list(self, phone_number):
+            return []
+
+    class _Client:
+        def __init__(self, *a, **k):
+            self.incoming_phone_numbers = _Numbers()
+
+    monkeypatch.setattr("app.gateway.twilio_client", lambda sid, tok: _Client())
+    cfg = Config(db_path=":memory:", timezone=TZ, inbound_mode="poll",
+                 twilio_account_sid="ACx", twilio_auth_token="t", twilio_from="+15550000000")
+    with pytest.raises(RuntimeError, match="not a number on this Twilio account"):
+        main_mod.build(cfg)
