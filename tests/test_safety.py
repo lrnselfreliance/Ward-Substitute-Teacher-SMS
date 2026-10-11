@@ -271,3 +271,13 @@ def test_admin_cancel_while_halted_says_who_was_not_told(app):
     with app.session_factory() as session:
         assert session.scalar(select(Request)).status == CANCELLED
         assert session.scalar(select(Request)).status != OPEN
+
+
+def test_dropped_texts_keep_the_sender_but_not_the_words(app):
+    _setup(app)
+    app.sms(ADMIN, "ADMIN HALT")
+    app.sms(TEACHER, "something private")
+    with app.session_factory() as session:
+        row = session.query(DroppedMessage).one()
+        assert row.phone == TEACHER
+        assert row.body is None

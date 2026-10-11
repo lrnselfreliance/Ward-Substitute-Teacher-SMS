@@ -271,8 +271,10 @@ class Router:
             return self._command(session, person, body)
         if is_admin:
             return M.HALTED_REPLY
+        # Who, not what: the UNHALT summary only needs names and counts, and
+        # the privacy policy does not promise to keep texts we never read.
         session.add(
-            DroppedMessage(phone=phone, body=body, received_at=self.clock.now())
+            DroppedMessage(phone=phone, body=None, received_at=self.clock.now())
         )
         log.warning("HALTED: dropped text from %s", phone)
         return None
