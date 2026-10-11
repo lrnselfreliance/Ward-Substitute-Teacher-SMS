@@ -375,6 +375,13 @@ def admin_sub(ctx: Ctx) -> str:
         )
 
     teacher = matches[0]
+    if not teacher.active:
+        # STOP and PAUSE both clear `active`. Either way they asked not to be
+        # texted, and an admin cannot override that on their behalf.
+        return (
+            f"{teacher.name} has opted out or paused and can't be texted. "
+            "They can text RESUME or START to come back."
+        )
     if not teacher.class_name:
         return f"{teacher.name} has no class on file. Ask them to text CLASS <name>."
     return _file_request(ctx, teacher, service_date, note.strip() or None, on_behalf=True)

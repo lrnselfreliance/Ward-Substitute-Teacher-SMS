@@ -269,3 +269,47 @@ def test_old_database_gains_the_new_column(tmp_path):
     with sqlite3.connect(path) as conn:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(request)")}
     assert "requested_by_id" in cols
+
+
+# -- opt-outs are honoured on every new path -----------------------------------
+
+
+def test_admin_cannot_request_for_a_teacher_who_opted_out(app):
+    _two_teachers(app)
+    app.sms(TEACHER, "STOP")
+    app.clear()
+
+    app.sms(ADMIN, "ADMIN SUB 3/15 6a")
+    assert "opted out or paused" in app.last(ADMIN)
+    assert app.count(TEACHER) == 0
+    with app.session_factory() as session:
+        assert session.scalar(select(Request)) is None
+
+
+def test_requesting_admin_who_opted_out_is_not_texted(app):
+    _two_teachers(app)
+    app.sms(ADMIN, "ADMIN SUB 3/15 6a")
+    asked = sorted(app.texted(*SUBS[:3]))
+    app.sms(ADMIN, "STOP")
+    app.clear()
+
+    app.sms(asked[0], "yes")
+    assert "Reach them at" in app.last(TEACHER)
+    assert app.count(ADMIN) == 0
+
+
+def test_stop_withdraws_open_requests_so_no_later_text_follows(app):
+    _two_teachers(app)
+    app.sms(TEACHER, "SUB 3/15")
+    asked = sorted(app.texted(*SUBS[:3]))
+    app.clear()
+
+    app.sms(TEACHER, "STOP")
+    assert app.count(TEACHER) == 1  # the STOP confirmation only
+    for phone in asked:
+        assert "covered now" in app.last(phone)
+
+    app.clear()
+    app.sms(asked[0], "yes")
+    assert app.count(TEACHER) == 0
+    assert "just got filled" in app.last(asked[0]) or "didn't understand" in app.last(asked[0])

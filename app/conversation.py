@@ -30,14 +30,17 @@ from .models import (
     ASK_NAME,
     ASK_ROLE,
     ASK_SUNDAYS,
+    CANCELLED,
     CONFIRM,
     DONE,
     EXPIRED,
+    OPEN,
     PENDING,
     SUPERSEDED,
     Offer,
     Person,
     ProcessedMessage,
+    Request,
 )
 from .parsers import (
     clean_name,
@@ -108,6 +111,7 @@ class Router:
             if person:
                 person.active = False
                 self._release_pending(session, person)
+                self._cancel_open_requests(session, person)
             return M.stopped(self.config.org_name)
         if text in START_WORDS and (person is None or not person.active):
             return self._opt_in(session, person, phone, body)
@@ -222,6 +226,24 @@ class Router:
         ).all()
         for offer in offers:
             offer.status = "expired"
+
+    def _cancel_open_requests(self, session: Session, person: Person) -> None:
+        """STOP promises no further messages, which an open request would
+        break the moment a substitute accepted. Withdraw it; the people
+        already asked are told to stand down."""
+        requests = session.scalars(
+            select(Request).where(
+                Request.teacher_id == person.id, Request.status == OPEN
+            )
+        ).all()
+        for request in requests:
+            request.status = CANCELLED
+            for offer in request.offers:
+                if offer.status == PENDING:
+                    offer.status = SUPERSEDED
+                    self.gateway.send(
+                        offer.person.phone, M.superseded(self.config.org_name)
+                    )
 
     def _answer_offer(self, session: Session, offer: Offer, body: str) -> str:
         answer = parse_yes_no(body)

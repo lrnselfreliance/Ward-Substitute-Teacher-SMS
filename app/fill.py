@@ -68,6 +68,8 @@ class Filler:
         admin = request.requested_by
         if not admin or admin.id == request.teacher_id or admin.id == exclude:
             return
+        if not admin.active:  # opted out since filing it
+            return
         self.gateway.send(
             admin.phone,
             M.filled_requester(
