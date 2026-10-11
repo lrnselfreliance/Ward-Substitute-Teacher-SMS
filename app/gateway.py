@@ -105,9 +105,14 @@ class GuardedGateway:
     connection, would roll back the caller's work.
     """
 
-    def __init__(self, inner, session_factory) -> None:
+    def __init__(self, inner, session_factory, db_path: str | None = None) -> None:
         self._inner = inner
         self._session_factory = session_factory
+        # A real file lets send() re-check the switch cheaply with its own
+        # sqlite connection, closing the gap where `subctl halt` from another
+        # process lands while a tick is mid-batch. In-memory databases
+        # (tests) rely on refresh() alone.
+        self._db_path = db_path if db_path and db_path != ":memory:" else None
         self._halted = False
         self._admin_phones: set[str] = set()
         # Outbound sends not yet written to the database. The tick drains
@@ -138,7 +143,28 @@ class GuardedGateway:
     def halted(self) -> bool:
         return self._halted
 
+    def _recheck(self) -> None:
+        """Pick up a halt set by another process since the last refresh."""
+        if self._halted or not self._db_path:
+            return
+        import sqlite3
+
+        try:
+            with sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True, timeout=2) as conn:
+                row = conn.execute("SELECT value FROM setting WHERE key='halt'").fetchone()
+                if row and row[0]:
+                    self._halted = True
+                    self._admin_phones = {
+                        r[0] for r in conn.execute(
+                            "SELECT phone FROM person WHERE is_admin=1 AND active=1 AND banned=0"
+                        )
+                    }
+                    log.warning("HALT detected from another process")
+        except sqlite3.Error as exc:
+            log.warning("halt re-check failed: %s", exc)
+
     def send(self, to: str, body: str, *, force: bool = False) -> bool:
+        self._recheck()
         if self._halted and not force and to not in self._admin_phones:
             log.warning("HALTED: dropped message to %s", to)
             return False

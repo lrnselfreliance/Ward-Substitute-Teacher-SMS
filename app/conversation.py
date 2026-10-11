@@ -150,6 +150,11 @@ class Router:
         if halted(session):
             return self._while_halted(session, person, phone, body)
         if text in START_WORDS and (person is None or not person.active):
+            if text == "yes" and person and self._offer_just_lapsed(session, person):
+                # They are answering an offer that PAUSE/STOP released, not
+                # asking to re-subscribe. Say so instead of silently opting
+                # them back in.
+                return M.PAUSED_TOO_LATE
             return self._opt_in(session, person, phone, body)
         if text in HELP_WORDS:
             if person and person.enrolled:
@@ -245,6 +250,15 @@ class Router:
         session.add(person)
         session.flush()
         return person
+
+    def _offer_just_lapsed(self, session: Session, person: Person) -> bool:
+        return session.scalar(
+            select(Offer).where(
+                Offer.person_id == person.id,
+                Offer.status.in_([EXPIRED, SUPERSEDED]),
+                Offer.sent_at >= self.clock.now() - timedelta(days=3),
+            )
+        ) is not None
 
     def _while_halted(
         self, session: Session, person: Person | None, phone: str, body: str

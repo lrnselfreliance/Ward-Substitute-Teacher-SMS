@@ -13,6 +13,7 @@ from . import messages as M
 from .clock import to_local
 from .halt import clear_halt, halted, set_halt
 from .models import (
+    ACCEPTED,
     DONE,
     FILLED,
     OPEN,
@@ -299,6 +300,10 @@ def cmd_status(ctx: Ctx) -> str:
 def cmd_pause(ctx: Ctx) -> str:
     ctx.person.active = False
     ctx.session.flush()
+    # An offer they are holding must not sit there until its TTL: release it
+    # and let that request move on to the next person now.
+    for request in ctx.filler.release_offers(ctx.session, ctx.person):
+        ctx.filler.advance(ctx.session, request)
     return M.PAUSED
 
 
@@ -533,13 +538,29 @@ def admin_fill(ctx: Ctx) -> str:
     request.status = FILLED
     request.filled_by_id = person.id
     request.filled_at = ctx.clock.now()
+    org = ctx.config.org_name
     for offer in request.offers:
-        if offer.status == PENDING:
+        if offer.status != PENDING:
+            continue
+        if offer.person_id == person.id:
+            # They were in the batch: this is their acceptance, not a stand-down.
+            offer.status = ACCEPTED
+            offer.responded_at = ctx.clock.now()
+            offer.raw_reply = f"ADMIN FILL by {ctx.person.name}"
+        else:
             offer.status = SUPERSEDED
-            ctx.gateway.send(offer.person.phone, M.superseded(ctx.config.org_name))
+            ctx.filler.text(offer.person, M.superseded(org))
     ctx.session.flush()
+    teacher = request.teacher
+    # Both parties get the same assignment texts a YES would have produced.
+    ctx.filler.text(
+        person,
+        M.accepted_sub(org, teacher.name, teacher.phone, request.class_name, when),
+    )
+    if teacher.id != ctx.person.id:
+        ctx.filler.text(teacher, M.accepted_teacher(org, person.name, person.phone, when))
     ctx.filler.notify_requester(ctx.session, request, exclude=ctx.person.id)
-    return f"Recorded: {person.name} subbing {M.pretty_date(when)}."
+    return f"Recorded: {person.name} subbing {M.pretty_date(when)}. Both have been texted."
 
 
 def admin_move(ctx: Ctx) -> str:
@@ -566,12 +587,10 @@ def admin_broadcast(ctx: Ctx) -> str:
     if ctx.filler.quiet.is_quiet(ctx.clock.now()):
         return M.QUIET_BROADCAST
     people = ctx.session.scalars(
-        select(Person).where(Person.active.is_(True), Person.enroll_state == DONE)
+        select(Person).where(Person.enroll_state == DONE, Person.id != ctx.person.id)
     ).all()
-    for p in people:
-        if p.id != ctx.person.id:
-            ctx.gateway.send(p.phone, body)
-    return f"Sent to {len(people) - 1} people."
+    sent = sum(ctx.filler.text(p, body) for p in people)
+    return f"Sent to {sent} people."
 
 
 def _refresh_guard(ctx: Ctx) -> None:

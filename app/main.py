@@ -51,7 +51,7 @@ def build(config: Config):
 
     # The HALT switch is enforced here, below everything that decides what
     # to send, so it holds even when the bug being stopped is upstream.
-    gateway = GuardedGateway(gateway, session_factory)
+    gateway = GuardedGateway(gateway, session_factory, config.db_path)
 
     filler = Filler(session_factory, gateway, clock, config)
     router = Router(session_factory, gateway, clock, config, filler)

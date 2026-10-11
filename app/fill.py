@@ -70,16 +70,52 @@ class Filler:
         for admin in self.admins(session):
             self.gateway.send(admin.phone, body)
 
+    def text(self, person: Person, body: str) -> bool:
+        """The one place that decides whether a person may be texted at all.
+
+        Banned people never are. Inactive people (STOP or PAUSE) are not sent
+        anything they did not just ask for. Every notice that goes to someone
+        other than the sender of the current message should come through
+        here rather than calling the gateway directly.
+        """
+        if not self.may_text(person):
+            return False
+        return self.gateway.send(person.phone, body)
+
+    @staticmethod
+    def may_text(person: Person) -> bool:
+        return not person.banned and person.active
+
+    def release_offers(self, session: Session, person: Person) -> list[Request]:
+        """Expire this person's pending offers. Returns the affected requests
+        so the caller can move their batches along."""
+        requests = []
+        for offer in session.scalars(
+            select(Offer).where(Offer.person_id == person.id, Offer.status == PENDING)
+        ).all():
+            offer.status = EXPIRED
+            requests.append(offer.request)
+        session.flush()
+        return requests
+
+    def advance(self, session: Session, request: Request) -> None:
+        """Send the next batch if nothing is pending and the request is open."""
+        if request.status != OPEN:
+            return
+        pending = session.scalar(
+            select(Offer).where(Offer.request_id == request.id, Offer.status == PENDING)
+        )
+        if not pending:
+            self.send_next_batch(session, request)
+
     def withdraw(self, session: Session, person: Person) -> int:
         """Pull someone out of everything in flight: their pending offers
         expire and their open requests are cancelled, with the people already
         asked told to stand down. Used by STOP and BAN. Returns how many of
         those people were notified."""
         told = 0
-        for offer in session.scalars(
-            select(Offer).where(Offer.person_id == person.id, Offer.status == PENDING)
-        ).all():
-            offer.status = EXPIRED
+        for request in self.release_offers(session, person):
+            self.advance(session, request)
         for request in session.scalars(
             select(Request).where(
                 Request.teacher_id == person.id, Request.status == OPEN
@@ -94,14 +130,18 @@ class Filler:
         Returns how many people were notified."""
         request.status = CANCELLED
         told = 0
+        people = [o.person for o in request.offers if o.status == PENDING]
         for offer in request.offers:
             if offer.status == PENDING:
                 offer.status = SUPERSEDED
-                self.gateway.send(offer.person.phone, M.superseded(self.config.org_name))
-                told += 1
         if request.filled_by:
-            self.gateway.send(request.filled_by.phone, M.superseded(self.config.org_name))
-            told += 1
+            people.append(request.filled_by)
+        # Count who *should* hear, not who the carrier reached: while halted
+        # the sends are dropped, and the caller reports exactly that.
+        for person in people:
+            if self.may_text(person):
+                self.gateway.send(person.phone, M.superseded(self.config.org_name))
+                told += 1
         session.flush()
         return told
 
@@ -112,10 +152,8 @@ class Filler:
         admin = request.requested_by
         if not admin or admin.id == request.teacher_id or admin.id == exclude:
             return
-        if not admin.active:  # opted out since filing it
-            return
-        self.gateway.send(
-            admin.phone,
+        self.text(
+            admin,
             M.filled_requester(
                 self.config.org_name,
                 request.filled_by.name,
@@ -251,9 +289,7 @@ class Filler:
         ).all()
         for other in others:
             other.status = SUPERSEDED
-            self.gateway.send(
-                other.person.phone, M.superseded(self.config.org_name)
-            )
+            self.text(other.person, M.superseded(self.config.org_name))
 
         self.gateway.send(
             teacher.phone,

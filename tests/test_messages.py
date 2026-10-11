@@ -67,6 +67,7 @@ RENDERED = {
     "filled_requester": M.filled_requester(ORG, "Katherine Wetherington", "Tom Teacher", SUNDAY),
     "superseded": M.superseded(ORG),
     "PAUSED": M.PAUSED,
+    "PAUSED_TOO_LATE": M.PAUSED_TOO_LATE,
     "RESUMED": M.RESUMED,
     "stopped": M.stopped(ORG),
     "UNKNOWN": M.UNKNOWN,

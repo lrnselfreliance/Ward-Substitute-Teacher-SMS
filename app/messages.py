@@ -231,6 +231,10 @@ def sundays_set(mask: int) -> str:
 
 
 PAUSED = "Paused. You won't be contacted until you text RESUME."
+PAUSED_TOO_LATE = (
+    "You're paused, so that request has moved on to someone else. "
+    "Text RESUME to be asked again."
+)
 RESUMED = "Welcome back! You're active again."
 def stopped(org: str) -> str:
     return (
