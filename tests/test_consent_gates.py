@@ -37,7 +37,7 @@ def test_cancel_does_not_text_a_sub_who_opted_out_after_accepting(staffed):
     app.clear()
     app.sms(TEACHER, "CANCEL 3/15")
     assert app.count(sub) == 0
-    assert "Cancelled" in app.last(TEACHER)
+    assert "Withdrawn" in app.last(TEACHER)
 
 
 def test_pause_releases_the_offer_and_the_batch_moves_on(staffed):

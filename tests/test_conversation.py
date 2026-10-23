@@ -341,7 +341,7 @@ def test_cancel_with_a_date_still_cancels_the_request(app):
     app.sms(TEACHER, "SUB 3/15")
     app.sms(TEACHER, "CANCEL 3/15")
 
-    assert "Cancelled" in app.last(TEACHER)
+    assert "Withdrawn" in app.last(TEACHER)
     with app.session_factory() as session:
         assert session.scalar(
             select(Person).where(Person.phone == TEACHER)

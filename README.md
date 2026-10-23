@@ -119,14 +119,23 @@ sending every batch twice. The `CMD` pins `--workers 1`; leave it.
 
 ## Commands members can text
 
-`HELP` is role-aware — people only see what they can actually use.
+`HELP` is role-aware — people only see what they can actually use. Every
+command also explains itself: `SUB HELP` or `HELP SUB` returns one text with
+what it does, an example, and the gotcha if there is one. Admin subcommands
+work the same way: `ADMIN OPEN HELP`. A command sent without the argument it
+needs replies with that same help.
+
+`WITHDRAW <date>` takes back a request. `NEVERMIND`, `NVM` and `CANCEL <date>`
+are accepted as aliases. A bare `CANCEL` with no date is a carrier opt-out
+keyword that Twilio acts on before the app sees it, so it unsubscribes the
+sender; the help text for WITHDRAW says so.
 
 | Role | Commands |
 |---|---|
 | Everyone | `HELP` `STATUS` `PAUSE` `RESUME` `STOP` |
-| Teachers | `SUB <date> [note]` `CANCEL <date>` `WHO` `CLASS <name>` |
+| Teachers | `SUB <date> [note]` `WITHDRAW <date>` `WHO` `CLASS <name>` |
 | Substitutes | `YES` `NO` `SUNDAYS 1 3`/`ALL` `MINE` |
-| Admins | `ADMIN HELP` `SUB <date> <teacher>` `CANCEL <date> <teacher>` `OPEN` `SUNDAY <date>` `REQUEST <id>` `ROSTER` `FILL` `MOVE` `BROADCAST` `BAN` `UNBAN` `HALT` `UNHALT` |
+| Admins | `ADMIN HELP` `SUB <date> <teacher>` `WITHDRAW <date> <teacher>` `OPEN` `SUNDAY <date>` `REQUEST <id>` `ROSTER` `FILL` `MOVE` `BROADCAST` `BAN` `UNBAN` `HALT` `UNHALT` |
 
 ### Leader guide
 
@@ -159,7 +168,7 @@ both, or neither.
 | `ADMIN FILL 10/18 sam` | Record a sub you arranged in person, so the rotation stays fair |
 | `ADMIN MOVE <old> <new>` | Someone changed phone numbers; keeps their history |
 | `ADMIN BROADCAST <msg>` | Text everyone who is active. 8am–9pm only |
-| `ADMIN CANCEL 10/18 nursery` | Withdraw a teacher's request; the teacher and anyone asked are told |
+| `ADMIN WITHDRAW 10/18 nursery` | Take back a teacher's request; the teacher and anyone asked are told |
 | `ADMIN HALT [reason]` / `ADMIN UNHALT` | Emergency stop for the whole service. See below |
 | `ADMIN BAN <who> [reason]` / `ADMIN UNBAN <who>` | Ignore one person completely. See below |
 
@@ -200,7 +209,7 @@ person misbehaves and you are nowhere near a computer:
 - **`ADMIN HALT [reason]`** stops the whole service. Nothing is sent to
   anyone until `ADMIN UNHALT`, enforced at the sending layer so it holds
   even if the fault is upstream. The fill loop pauses. Admins can still use
-  `OPEN`, `SUNDAY`, `REQUEST`, `ROSTER`, `CANCEL`, `BAN` and `UNBAN`;
+  `OPEN`, `SUNDAY`, `REQUEST`, `ROSTER`, `WITHDRAW`, `BAN` and `UNBAN`;
   anything that would start new texting is refused. Texts from members
   during a halt are dropped, and `UNHALT` tells you who went unanswered so
   you can follow up. The switch is stored in the database, so a restart
