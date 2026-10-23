@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import messages as M
-from .commands import COMMANDS, Ctx
+from .commands import ALIASES, COMMANDS, Ctx, cmd_admin
 from .halt import halted
 from .models import (
     ASK_CLASS,
@@ -62,6 +62,9 @@ STOP_WORDS = {
     "quit", "end", "optout", "opt out", "revoke",
 }
 HELP_WORDS = {"help", "info"}
+HELP_WORDS_UPPER = {w.upper() for w in HELP_WORDS}
+# Words that are not commands but deserve a "YES HELP" style explanation.
+HELP_ONLY = {"YES", "NO", "STOP"}
 # Registered A2P opt-in keywords. These only take effect for someone who is
 # unknown or inactive -- an enrolled member's "yes" must still answer the
 # offer they are holding.
@@ -173,8 +176,13 @@ class Router:
         if not person.enrolled:
             return self._onboard(session, person, body)
 
-        # 4. explicit command
-        head, _ = split_command(body)
+        # 4. explicit command, or help about one: "SUB HELP", "HELP SUB",
+        #    "YES HELP". Help is checked first so it never runs the command.
+        head, arg = split_command(body)
+        if head in HELP_WORDS_UPPER and arg:
+            return self._help_about(session, person, arg)
+        if arg.strip().upper() == "HELP" and (head in COMMANDS or head in HELP_ONLY):
+            return self._help_about(session, person, head)
         if head in COMMANDS:
             return self._command(session, person, body)
 
@@ -278,6 +286,24 @@ class Router:
         )
         log.warning("HALTED: dropped text from %s", phone)
         return None
+
+    def _help_about(self, session: Session, person: Person, what: str) -> str:
+        """Explain one command. Admin subcommands are delegated to cmd_admin,
+        which already knows how to answer "ADMIN OPEN HELP"."""
+        head, rest = split_command(what)
+        head = ALIASES.get(head, head)
+        if head == "ADMIN":
+            if not person.is_admin:
+                return M.UNKNOWN
+            return cmd_admin(
+                Ctx(
+                    session=session, person=person, arg=f"HELP {rest}".strip(),
+                    filler=self.filler, gateway=self.gateway,
+                    clock=self.clock, config=self.config,
+                )
+            )
+        text = M.command_help(head, person)
+        return text or M.UNKNOWN
 
     def _command(self, session: Session, person: Person, body: str) -> str | None:
         head, arg = split_command(body)

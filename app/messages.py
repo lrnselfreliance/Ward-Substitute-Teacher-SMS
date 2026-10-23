@@ -222,7 +222,7 @@ def unfilled_teacher(org: str, class_name: str | None, d: date) -> str:
 
 
 def cancelled(d: date) -> str:
-    return f"Cancelled your sub request for {pretty_date(d)}."
+    return f"Withdrawn: your sub request for {pretty_date(d)}. Anyone who was asked has been told."
 
 
 NOT_SUNDAY = "{given} is a {weekday}. Did you mean {suggestion}? Reply with the date."
@@ -263,7 +263,7 @@ def quiet_broadcast(start: time, end: time) -> str:
 
 HALTED_CONFIRM = (
     "HALTED. No texts will go out to anyone until ADMIN UNHALT. "
-    "ADMIN OPEN, ROSTER, CANCEL and BAN still work."
+    "ADMIN OPEN, ROSTER, WITHDRAW and BAN still work."
 )
 HALTED_REPLY = "Service is halted - nothing is being sent. ADMIN UNHALT to resume."
 ADMIN_HALTED_BLOCK = (
@@ -303,7 +303,7 @@ def cancelled_on_behalf(org: str, admin: str, d: date) -> str:
 HELP_COMMON = ["HELP - this list", "STATUS - where things stand"]
 HELP_TEACHER = [
     "SUB <date> - request a sub",
-    "CANCEL <date> - cancel that request",
+    "WITHDRAW <date> - no longer need a sub",
     "WHO - who's subbing for you",
     "CLASS <name> - change your class",
 ]
@@ -321,7 +321,7 @@ HELP_ADMIN = [
 ]
 
 ADMIN_USAGE = (
-    "ADMIN SUB <date> <teacher> | CANCEL <date> <teacher> | OPEN | SUNDAY <date> | "
+    "ADMIN SUB <date> <teacher> | WITHDRAW <date> <teacher> | OPEN | SUNDAY <date> | "
     "REQUEST <id> | ROSTER | FILL <date> <name> | MOVE <old> <new> | "
     "BROADCAST <msg> | BAN <who> | UNBAN <who> | HALT | UNHALT. "
     "Text ADMIN HELP for a plain-English guide."
@@ -347,11 +347,13 @@ def admin_guide(org: str, quiet_start: time, quiet_end: time) -> str:
             "rotation stays fair",
             "ADMIN MOVE <old phone> <new phone> - someone got a new number",
             f"ADMIN BROADCAST <message> - text everyone ({waking} only)",
-            "ADMIN CANCEL 10/18 nursery - withdraw a teacher's request",
+            "ADMIN WITHDRAW 10/18 nursery - take back a teacher's request",
+            "",
+            "Any command + HELP explains it, e.g. ADMIN OPEN HELP.",
             "",
             "If something goes wrong:",
             "ADMIN HALT - emergency stop. Nothing is sent to anyone until "
-            "ADMIN UNHALT. You can still use OPEN, ROSTER, CANCEL and BAN.",
+            "ADMIN UNHALT. You can still use OPEN, ROSTER, WITHDRAW and BAN.",
             "ADMIN BAN jayn being rude - the service ignores that person "
             "completely until ADMIN UNBAN. Use a full phone number for "
             "someone who never signed up. Admins can't be banned by text.",
@@ -364,6 +366,148 @@ def admin_guide(org: str, quiet_start: time, quiet_end: time) -> str:
 
 
 HELP_FOOTER = "Msg&data rates may apply. Reply STOP to opt out."
+HELP_HINT = "Any command + HELP explains it, e.g. SUB HELP."
+
+
+# -- per-command help --------------------------------------------------------
+#
+# One text each. Each says what the command does, gives one real example and
+# names the one gotcha, if there is one. Looked up by the canonical command
+# name; aliases resolve to it first.
+
+COMMAND_HELP = {
+    "SUB": (
+        "SUB asks for a substitute for a Sunday; your class is on file. "
+        "e.g. SUB 10/18, or SUB 10/18 lesson is in the closet. "
+        "Must be a Sunday. Ask early."
+    ),
+    "WITHDRAW": (
+        "WITHDRAW 10/18 takes back a request you no longer need; anyone asked "
+        "is told. Careful: CANCEL by itself unsubscribes you. Always include the date."
+    ),
+    "WHO": (
+        "WHO lists your upcoming requests and who is subbing for each, with "
+        "their number. Nothing to add after it."
+    ),
+    "CLASS": (
+        "CLASS changes the class on file for your requests. e.g. CLASS CTR 7. "
+        "Past requests keep the class they had."
+    ),
+    "SUNDAYS": (
+        "SUNDAYS sets which Sundays of the month you can sub. e.g. SUNDAYS 1 3 5, "
+        "or SUNDAYS ALL. You are only asked about Sundays you chose."
+    ),
+    "MINE": (
+        "MINE lists the Sundays you have agreed to sub, with the teacher and "
+        "class. Nothing to add after it."
+    ),
+    "STATUS": (
+        "STATUS sums up where things stand for you: open requests, who is "
+        "subbing, and any request waiting on your YES or NO."
+    ),
+    "PAUSE": (
+        "PAUSE stops you being asked for a while, e.g. a holiday. A request you "
+        "are holding moves to the next person. RESUME when you are back."
+    ),
+    "RESUME": "RESUME ends a PAUSE so you are asked again.",
+    "YES": (
+        "YES accepts the request you were just sent; the first YES wins and "
+        "you get the teacher's number. If someone beat you to it, you are told."
+    ),
+    "NO": (
+        "NO declines the request you were just sent so it moves to the next "
+        "person at once. Silence is not a no, but a quick NO is kinder."
+    ),
+    "STOP": (
+        "STOP leaves the service for good: no more texts. Text START to come "
+        "back. To take a break instead, use PAUSE."
+    ),
+    "HELP": "HELP lists your commands. " + HELP_HINT,
+}
+
+# Which role a command belongs to, for a friendly note when the wrong role
+# asks. Commands missing here are for everyone.
+COMMAND_ROLE = {
+    "SUB": "teacher", "WITHDRAW": "teacher", "WHO": "teacher", "CLASS": "teacher",
+    "SUNDAYS": "substitute", "MINE": "substitute", "YES": "substitute", "NO": "substitute",
+}
+
+
+def command_help(name: str, person) -> str | None:
+    text = COMMAND_HELP.get(name)
+    if text is None:
+        return None
+    role = COMMAND_ROLE.get(name)
+    if role == "teacher" and not person.is_teacher:
+        return f"{name} is a teacher command. {text}"
+    if role == "substitute" and not person.is_substitute:
+        return f"{name} is a substitute command. {text}"
+    return text
+
+
+def admin_command_help(name: str, quiet_start: time, quiet_end: time) -> str | None:
+    waking = f"{clock_time(quiet_end)}-{clock_time(quiet_start)}"
+    texts = {
+        "SUB": (
+            "ADMIN SUB <date> <teacher> [note] files a request for a teacher. "
+            "Name them by first or last name, class, last 4 digits, or #number "
+            "from ROSTER. e.g. ADMIN SUB 10/18 nursery out of town"
+        ),
+        "WITHDRAW": (
+            "ADMIN WITHDRAW <date> <teacher> takes back a teacher's request; "
+            "they and anyone asked are told. e.g. ADMIN WITHDRAW 10/18 nursery"
+        ),
+        "OPEN": (
+            "ADMIN OPEN lists every request still waiting for a sub, soonest "
+            "first, with its #number. Nothing to add after it."
+        ),
+        "SUNDAY": (
+            "ADMIN SUNDAY <date> lists every request for that Sunday and how "
+            "each stands. e.g. ADMIN SUNDAY 10/18"
+        ),
+        "REQUEST": (
+            "ADMIN REQUEST <#> shows who was asked about one request, when, and "
+            "what they said. Get the # from ADMIN OPEN. e.g. ADMIN REQUEST 12"
+        ),
+        "ROSTER": (
+            "ADMIN ROSTER lists everyone enrolled: #number, roles (T teacher, "
+            "S sub, A admin), class, phone. Use the #number in other commands."
+        ),
+        "FILL": (
+            "ADMIN FILL <date> <name> records a sub you arranged in person so "
+            "turns stay fair; both are texted. e.g. ADMIN FILL 10/18 sam"
+        ),
+        "MOVE": (
+            "ADMIN MOVE <old phone> <new phone> moves someone to a new number "
+            "and keeps their history. e.g. ADMIN MOVE 8015551234 8015556789"
+        ),
+        "BROADCAST": (
+            f"ADMIN BROADCAST <message> texts everyone active, {waking} only. "
+            "e.g. ADMIN BROADCAST Primary meeting moved to 10am"
+        ),
+        "BAN": (
+            "ADMIN BAN <who> [reason] makes the service ignore that person until "
+            "ADMIN UNBAN. Name, class, last 4 digits, or a full phone number for "
+            "a stranger. Admins can't be banned."
+        ),
+        "UNBAN": (
+            "ADMIN UNBAN <who> lifts a ban; they come back exactly as they were. "
+            "e.g. ADMIN UNBAN jeff"
+        ),
+        "HALT": (
+            "ADMIN HALT [reason] stops ALL texting until ADMIN UNHALT. OPEN, "
+            "ROSTER, WITHDRAW and BAN still work. Other admins are told. For emergencies."
+        ),
+        "UNHALT": (
+            "ADMIN UNHALT resumes the service after a HALT and tells you who "
+            "texted while it was stopped."
+        ),
+        "HELP": (
+            "ADMIN HELP is the leader guide. Any admin command + HELP explains "
+            "it, e.g. ADMIN OPEN HELP."
+        ),
+    }
+    return texts.get(name)
 
 
 def help_for(person, org: str) -> str:
@@ -380,6 +524,7 @@ def help_for(person, org: str) -> str:
     lines += HELP_COMMON
     if person.is_admin:
         lines += HELP_ADMIN
+    lines.append(HELP_HINT)
     lines.append(HELP_FOOTER)
     return "\n".join(lines)
 

@@ -249,7 +249,7 @@ def test_admin_cancel_tells_teacher_and_offerees(app):
     asked = sorted(app.texted(*SUBS[:4]))
     app.clear()
     app.sms(ADMIN, "ADMIN CANCEL 3/15 tom")
-    assert "Cancelled Tom Teacher's request" in app.last(ADMIN)
+    assert "Withdrew Tom Teacher's request" in app.last(ADMIN)
     assert "Ada cancelled your sub request" in app.last(TEACHER)
     for phone in asked:
         assert "covered now" in app.last(phone)

@@ -67,6 +67,7 @@ RENDERED = {
     "filled_requester": M.filled_requester(ORG, "Katherine Wetherington", "Tom Teacher", SUNDAY),
     "superseded": M.superseded(ORG),
     "PAUSED": M.PAUSED,
+    "HELP_HINT": M.HELP_HINT,
     "PAUSED_TOO_LATE": M.PAUSED_TOO_LATE,
     "RESUMED": M.RESUMED,
     "stopped": M.stopped(ORG),
@@ -130,7 +131,7 @@ def test_every_public_message_is_covered():
         if not name.startswith("_")
         and inspect.isfunction(value)
         and name not in {"pretty_date", "pretty_sundays", "describe", "help_for",
-                         "clock_time"}
+                         "clock_time", "command_help", "admin_command_help"}
     }
     missing = (public | functions) - set(RENDERED) - MULTI_SEGMENT_BY_DESIGN
     # NOT_SUNDAY is a template filled in at call time.

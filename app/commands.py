@@ -74,7 +74,7 @@ def _resolve_service_date(ctx: Ctx) -> tuple[date | None, str | None, str]:
     """
     words = ctx.arg.split()
     if not words:
-        return None, None, "Which Sunday? e.g. SUB 3/15"
+        return None, None, M.command_help("SUB", ctx.person)
 
     for take in (3, 2, 1):
         if take > len(words):
@@ -187,10 +187,10 @@ def cmd_sub(ctx: Ctx) -> str:
     return _file_request(ctx, ctx.person, service_date, note)
 
 
-def cmd_cancel(ctx: Ctx) -> str:
+def cmd_withdraw(ctx: Ctx) -> str:
     service_date, _, error = _resolve_service_date(ctx)
     if error:
-        return "Which Sunday? e.g. CANCEL 3/15"
+        return M.command_help("WITHDRAW", ctx.person)
 
     request = ctx.session.scalar(
         select(Request).where(
@@ -232,7 +232,7 @@ def cmd_who(ctx: Ctx) -> str:
 def cmd_class(ctx: Ctx) -> str:
     name = clean_name(ctx.arg)
     if not name:
-        return "What class? e.g. CLASS 3rd grade"
+        return M.command_help("CLASS", ctx.person)
     ctx.person.class_name = name
     ctx.person.is_teacher = True
     ctx.session.flush()
@@ -341,6 +341,12 @@ def cmd_admin(ctx: Ctx) -> str:
         clock=ctx.clock,
         config=ctx.config,
     )
+    sub = ADMIN_ALIASES.get(sub, sub)
+    # ADMIN HELP OPEN and ADMIN OPEN HELP both explain one subcommand.
+    if sub == "HELP" and rest:
+        return _admin_help(ctx, ADMIN_ALIASES.get(split_command(rest)[0], split_command(rest)[0]))
+    if rest.strip().upper() == "HELP" and sub in ADMIN_COMMANDS:
+        return _admin_help(ctx, sub)
     handler = ADMIN_COMMANDS.get(sub)
     if not handler:
         state = halted(ctx.session)
@@ -351,6 +357,11 @@ def cmd_admin(ctx: Ctx) -> str:
     return handler(inner)
 
 
+def _admin_help(ctx: Ctx, name: str) -> str:
+    text = M.admin_command_help(name, ctx.config.quiet_start, ctx.config.quiet_end)
+    return text or M.ADMIN_USAGE
+
+
 def admin_help(ctx: Ctx) -> str:
     return M.admin_guide(ctx.config.org_name, ctx.config.quiet_start, ctx.config.quiet_end)
 
@@ -359,14 +370,14 @@ def admin_sub(ctx: Ctx) -> str:
     """ADMIN SUB <date> <teacher> [note] -- file a request for someone else."""
     service_date, rest, error = _resolve_service_date(ctx)
     if error:
-        return "Which Sunday, and for whom? e.g. ADMIN SUB 10/18 nursery"
+        return _admin_help(ctx, "SUB")
     error = _check_sunday(service_date, ctx.today)
     if error:
         return error
 
     who, _, note = (rest or "").partition(" ")
     if not who:
-        return "Which teacher? e.g. ADMIN SUB 10/18 nursery, or their name or last 4 digits"
+        return _admin_help(ctx, "SUB")
 
     matches = find_people(ctx.session, who, teachers_only=True)
     if not matches:
@@ -461,7 +472,7 @@ def admin_open(ctx: Ctx) -> str:
 def admin_sunday(ctx: Ctx) -> str:
     when = parse_date(ctx.arg, ctx.today)
     if not when:
-        return "Which Sunday? e.g. ADMIN SUNDAY 3/15"
+        return _admin_help(ctx, "SUNDAY")
     rows = ctx.session.scalars(
         select(Request).where(Request.service_date == when).order_by(Request.id)
     ).all()
@@ -472,7 +483,7 @@ def admin_sunday(ctx: Ctx) -> str:
 
 def admin_request(ctx: Ctx) -> str:
     if not ctx.arg.strip().lstrip("#").isdigit():
-        return "Which request? e.g. ADMIN REQUEST 12"
+        return _admin_help(ctx, "REQUEST")
     request = ctx.session.get(Request, int(ctx.arg.strip().lstrip("#")))
     if not request:
         return "No such request."
@@ -509,7 +520,7 @@ def admin_roster(ctx: Ctx) -> str:
 def admin_fill(ctx: Ctx) -> str:
     words = ctx.arg.split()
     if len(words) < 2:
-        return "ADMIN FILL <date> <name>"
+        return _admin_help(ctx, "FILL")
     when = parse_date(words[0], ctx.today)
     if not when:
         return "I couldn't read that date."
@@ -566,7 +577,7 @@ def admin_fill(ctx: Ctx) -> str:
 def admin_move(ctx: Ctx) -> str:
     words = ctx.arg.split()
     if len(words) != 2:
-        return "ADMIN MOVE <old number> <new number>"
+        return _admin_help(ctx, "MOVE")
     old, new = normalize_phone(words[0]), normalize_phone(words[1])
     if not old or not new:
         return "I couldn't read those numbers."
@@ -583,7 +594,7 @@ def admin_move(ctx: Ctx) -> str:
 def admin_broadcast(ctx: Ctx) -> str:
     body = ctx.arg.strip()
     if not body:
-        return "ADMIN BROADCAST <message>"
+        return _admin_help(ctx, "BROADCAST")
     if ctx.filler.quiet.is_quiet(ctx.clock.now()):
         return M.quiet_broadcast(ctx.config.quiet_start, ctx.config.quiet_end)
     people = ctx.session.scalars(
@@ -606,14 +617,14 @@ def _other_admins(ctx: Ctx, body: str) -> None:
             ctx.gateway.send(admin.phone, body)
 
 
-def admin_cancel(ctx: Ctx) -> str:
-    """ADMIN CANCEL <date> <teacher> -- withdraw someone else's request."""
+def admin_withdraw(ctx: Ctx) -> str:
+    """ADMIN WITHDRAW <date> <teacher> -- take back someone else's request."""
     service_date, rest, error = _resolve_service_date(ctx)
     if error:
-        return "Which Sunday, and whose? e.g. ADMIN CANCEL 10/18 nursery"
+        return _admin_help(ctx, "WITHDRAW")
     who, _, _ = (rest or "").partition(" ")
     if not who:
-        return "Whose request? e.g. ADMIN CANCEL 10/18 nursery"
+        return _admin_help(ctx, "WITHDRAW")
     matches = find_people(ctx.session, who, teachers_only=True, include_banned=True)
     if not matches:
         return f"No teacher matching '{who}'."
@@ -638,7 +649,7 @@ def admin_cancel(ctx: Ctx) -> str:
     note = ""
     if told and halted(ctx.session):
         note = f" {told} people had been asked and were NOT notified (halted)."
-    return f"Cancelled {teacher.name}'s request for {M.pretty_date(service_date)}.{note}"
+    return f"Withdrew {teacher.name}'s request for {M.pretty_date(service_date)}.{note}"
 
 
 def admin_ban(ctx: Ctx) -> str:
@@ -646,7 +657,7 @@ def admin_ban(ctx: Ctx) -> str:
     who, _, reason = ctx.arg.strip().partition(" ")
     reason = reason.strip() or None
     if not who:
-        return "ADMIN BAN <name, class, last 4 digits, #number, or full phone> [reason]"
+        return _admin_help(ctx, "BAN")
 
     phone = normalize_phone(who) if len(re.sub(r"\D", "", who)) >= 10 else None
     if phone:
@@ -694,7 +705,7 @@ def admin_ban(ctx: Ctx) -> str:
 def admin_unban(ctx: Ctx) -> str:
     who = ctx.arg.strip()
     if not who:
-        return "ADMIN UNBAN <who>"
+        return _admin_help(ctx, "UNBAN")
     phone = normalize_phone(who) if len(re.sub(r"\D", "", who)) >= 10 else None
     if phone:
         matches = [p for p in [ctx.session.scalar(select(Person).where(Person.phone == phone))] if p]
@@ -766,11 +777,14 @@ def _summarise_dropped(session: Session, dropped: list[DroppedMessage]) -> str:
 # switch itself. Anything that would start new texting is blocked.
 HALT_SAFE_ADMIN = {
     "HELP", "OPEN", "SUNDAY", "REQUEST", "ROSTER",
-    "HALT", "UNHALT", "BAN", "UNBAN", "CANCEL",
+    "HALT", "UNHALT", "BAN", "UNBAN", "WITHDRAW",
 }
 
+# Older or alternative spellings, resolved before dispatch and help lookup.
+ADMIN_ALIASES = {"CANCEL": "WITHDRAW", "NEVERMIND": "WITHDRAW", "NVM": "WITHDRAW"}
+
 ADMIN_COMMANDS = {
-    "CANCEL": admin_cancel,
+    "WITHDRAW": admin_withdraw,
     "BAN": admin_ban,
     "UNBAN": admin_unban,
     "HALT": admin_halt,
@@ -786,9 +800,13 @@ ADMIN_COMMANDS = {
     "BROADCAST": admin_broadcast,
 }
 
+# Member-command aliases. CANCEL keeps working with a date for anyone who
+# remembers it; bare CANCEL is a carrier opt-out keyword and never reaches here.
+ALIASES = {"CANCEL": "WITHDRAW", "NEVERMIND": "WITHDRAW", "NVM": "WITHDRAW"}
+
 COMMANDS = {
     "SUB": cmd_sub,
-    "CANCEL": cmd_cancel,
+    "WITHDRAW": cmd_withdraw,
     "WHO": cmd_who,
     "CLASS": cmd_class,
     "SUNDAYS": cmd_sundays,
@@ -798,3 +816,6 @@ COMMANDS = {
     "RESUME": cmd_resume,
     "ADMIN": cmd_admin,
 }
+
+for _alias, _target in ALIASES.items():
+    COMMANDS[_alias] = COMMANDS[_target]

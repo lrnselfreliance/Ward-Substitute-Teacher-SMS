@@ -191,7 +191,7 @@ def test_admin_sub_rejects_unknown_and_non_sunday(app):
     app.sms(ADMIN, "ADMIN SUB 3/16 6a")
     assert "Monday" in app.last(ADMIN)
     app.sms(ADMIN, "ADMIN SUB 3/15")
-    assert "Which teacher?" in app.last(ADMIN)
+    assert "ADMIN SUB <date> <teacher>" in app.last(ADMIN)
 
 
 def test_admin_sub_duplicate_is_reported_by_teacher_name(app):
